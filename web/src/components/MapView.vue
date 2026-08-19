@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, shallowRef, onMounted, onUnmounted, watch } from 'vue'
+import { Loader2 } from 'lucide-vue-next'
 import { Map, Marker, NavigationControl, AttributionControl, setWorkerUrl } from 'maplibre-gl'
 import type { GeoJSONSource } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -19,7 +20,7 @@ const emit = defineEmits<{
 const mapContainer = ref<HTMLElement | null>(null)
 const map = shallowRef<Map | null>(null)
 const isDragging = ref(false)
-
+const mapReady = ref(false)
 let markers: {
   sw: Marker
   nw: Marker
@@ -172,12 +173,12 @@ const setupMarkers = () => {
   se.on('dragend', handleDragEnd)
 }
 
-const fitToBBox = () => {
+const fitToBBox = (duration = 1000) => {
   if (!map.value) return
   const [minLng, minLat, maxLng, maxLat] = props.bbox
   map.value.fitBounds(
     [minLng, minLat, maxLng, maxLat],
-    { padding: 60, maxZoom: 14, duration: 1000 }
+    { padding: 60, maxZoom: 14, duration }
   )
 }
 
@@ -250,7 +251,9 @@ onMounted(() => {
     })
 
     setupMarkers()
-    fitToBBox()
+    map.value.resize()
+    fitToBBox(0)
+    mapReady.value = true
   })
 })
 
@@ -264,8 +267,14 @@ onUnmounted(() => {
 <template>
   <div class="map-wrapper">
     <div ref="mapContainer" class="map-container"></div>
-    <div class="map-actions">
-      <button @click="fitToBBox" class="fit-btn" title="Refit map to current bounding box">
+    <Transition name="map-fade">
+      <div v-if="!mapReady" class="map-loading">
+        <Loader2 class="spinner" :size="36" />
+        <span>Loading map…</span>
+      </div>
+    </Transition>
+    <div v-if="mapReady" class="map-actions">
+      <button @click="fitToBBox()" class="fit-btn" title="Refit map to current bounding box">
         🔍 Recenter Box
       </button>
     </div>
@@ -286,6 +295,37 @@ onUnmounted(() => {
 .map-container {
   width: 100%;
   height: 100%;
+}
+
+.map-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #111;
+  color: #888;
+  font-size: 13px;
+  z-index: 10;
+}
+
+.spinner {
+  color: #ff9900;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.map-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.map-fade-leave-to {
+  opacity: 0;
 }
 
 .map-actions {

@@ -5,10 +5,10 @@ import MapView from './components/MapView.vue'
 
 const health = ref<string | null>(null)
 
-// Default location: Amsterdam
-const cityName = ref('Amsterdam, Netherlands')
-const bbox = ref<[number, number, number, number]>([4.728797, 52.278174, 5.079162, 52.431064])
-const center = ref<[number, number]>([4.9041, 52.3676])
+// Default location: Boston, MA, USA
+const cityName = ref('Boston, MA, USA')
+const bbox = ref<[number, number, number, number]>([-71.1912, 42.2279, -70.9227, 42.3969])
+const center = ref<[number, number]>([-71.0589, 42.3601])
 
 onMounted(async () => {
   try {

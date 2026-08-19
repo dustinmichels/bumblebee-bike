@@ -57,9 +57,9 @@ func TestIngestDir(t *testing.T) {
 		t.Fatalf("open parquet: %v", err)
 	}
 
-	// 944 .fit.gz with GPS + 208 .gpx = 1152 total supported;
-	// 26 have no GPS data → expect 1126 rows.
-	const wantRows = 1126
+	// 944 .fit.gz + 208 .gpx + 12 .fit + 5 .gpx.gz + 3 .tcx.gz = 1172 total supported;
+	// 26 have no GPS data → expect 1146 rows.
+	const wantRows = 1146
 	if got := pf.NumRows(); got != wantRows {
 		t.Errorf("row count: got %d, want %d", got, wantRows)
 	}

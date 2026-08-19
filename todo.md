@@ -39,9 +39,9 @@ Then it needs to follow filename to find the corresponding file in the activitie
 
 - [x] .fit.gz
 - [x] .gpx
-- [ ] .fit
-- [ ] .gpx.gz
-- [ ] .tcx.gz
+- [x] .fit
+- [x] .gpx.gz
+- [x] .tcx.gz
 
 Treat this as a TODO list and tackle on format at a time. Skip the other formats.
 

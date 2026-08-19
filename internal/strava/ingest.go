@@ -160,7 +160,10 @@ func processActivities(
 // isSupportedTrack reports whether a filename has a supported GPS format.
 func isSupportedTrack(filename string) bool {
 	return strings.HasSuffix(filename, ".fit.gz") ||
-		strings.HasSuffix(filename, ".gpx")
+		strings.HasSuffix(filename, ".fit") ||
+		strings.HasSuffix(filename, ".gpx.gz") ||
+		strings.HasSuffix(filename, ".gpx") ||
+		strings.HasSuffix(filename, ".tcx.gz")
 }
 
 // routeTrack dispatches to the correct parser based on file extension.
@@ -168,8 +171,14 @@ func routeTrack(filename string, r io.Reader) ([][2]float64, error) {
 	switch {
 	case strings.HasSuffix(filename, ".fit.gz"):
 		return ReadFITGZ(r)
+	case strings.HasSuffix(filename, ".fit"):
+		return ReadFIT(r)
+	case strings.HasSuffix(filename, ".gpx.gz"):
+		return ReadGPXGZ(r)
 	case strings.HasSuffix(filename, ".gpx"):
 		return ReadGPX(r)
+	case strings.HasSuffix(filename, ".tcx.gz"):
+		return ReadTCXGZ(r)
 	default:
 		return nil, fmt.Errorf("unsupported track format: %s", filename)
 	}

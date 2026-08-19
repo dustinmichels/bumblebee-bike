@@ -1,11 +1,24 @@
 package strava
 
 import (
+	"compress/gzip"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"strconv"
 )
+
+// ReadGPXGZ decompresses a gzip stream then parses the GPX data inside.
+// Returns [lon, lat] pairs (X, Y) for all track points.
+func ReadGPXGZ(r io.Reader) ([][2]float64, error) {
+	gr, err := gzip.NewReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("gzip: %w", err)
+	}
+	defer gr.Close()
+
+	return ReadGPX(gr)
+}
 
 // ReadGPX parses a GPX file and returns [lon, lat] pairs (X, Y) for all
 // track points across all tracks and segments.
