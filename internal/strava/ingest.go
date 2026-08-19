@@ -15,13 +15,20 @@ import (
 // geoMetadata is the GeoParquet file-level metadata value for the "geo" key.
 const geoMetadata = `{"version":"1.1.0","primary_column":"geometry","columns":{"geometry":{"encoding":"WKB","geometry_types":["LineString"]}}}`
 
+// IngestResult holds counts of activities processed during ingest.
+type IngestResult struct {
+	Total     int
+	Parsed    int
+	RideCount int
+}
+
 // IngestZip reads a Strava bulk-export zip, processes all supported GPS
 // activity formats (.fit.gz, .gpx), and writes a geoparquet file to outPath.
 // The zip is read in-place; no temporary extraction is performed.
-func IngestZip(zipPath, outPath string) error {
+func IngestZip(zipPath, outPath string) (IngestResult, error) {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return fmt.Errorf("open zip %q: %w", zipPath, err)
+		return IngestResult{}, fmt.Errorf("open zip %q: %w", zipPath, err)
 	}
 	defer r.Close()
 
@@ -40,7 +47,7 @@ func IngestZip(zipPath, outPath string) error {
 		}
 	}
 	if csvEntry == nil {
-		return fmt.Errorf("activities.csv not found in %s", zipPath)
+		return IngestResult{}, fmt.Errorf("activities.csv not found in %s", zipPath)
 	}
 
 	// The prefix is the directory path inside the zip, e.g. "strava_export/".
@@ -48,12 +55,12 @@ func IngestZip(zipPath, outPath string) error {
 
 	rc, err := csvEntry.Open()
 	if err != nil {
-		return fmt.Errorf("open activities.csv in zip: %w", err)
+		return IngestResult{}, fmt.Errorf("open activities.csv in zip: %w", err)
 	}
 	activities, err := ParseActivities(rc)
 	rc.Close()
 	if err != nil {
-		return fmt.Errorf("parse activities.csv: %w", err)
+		return IngestResult{}, fmt.Errorf("parse activities.csv: %w", err)
 	}
 
 	opener := func(filename string) ([][2]float64, error) {
@@ -75,15 +82,15 @@ func IngestZip(zipPath, outPath string) error {
 
 // IngestDir reads an already-extracted Strava export directory and writes
 // a geoparquet file to outPath. Useful for faster iteration during development.
-func IngestDir(dir, outPath string) error {
+func IngestDir(dir, outPath string) (IngestResult, error) {
 	f, err := os.Open(filepath.Join(dir, "activities.csv"))
 	if err != nil {
-		return fmt.Errorf("open activities.csv: %w", err)
+		return IngestResult{}, fmt.Errorf("open activities.csv: %w", err)
 	}
 	activities, err := ParseActivities(f)
 	f.Close()
 	if err != nil {
-		return fmt.Errorf("parse activities.csv: %w", err)
+		return IngestResult{}, fmt.Errorf("parse activities.csv: %w", err)
 	}
 
 	opener := func(filename string) ([][2]float64, error) {
@@ -105,13 +112,15 @@ func processActivities(
 	activities []Activity,
 	openTrack func(filename string) ([][2]float64, error),
 	outPath string,
-) error {
+) (IngestResult, error) {
+	var result IngestResult
+	result.Total = len(activities)
+
 	out, err := os.Create(outPath)
 	if err != nil {
-		return fmt.Errorf("create %q: %w", outPath, err)
+		return result, fmt.Errorf("create %q: %w", outPath, err)
 	}
 	defer out.Close()
-
 	writer := parquet.NewGenericWriter[ActivityRow](out,
 		parquet.KeyValueMetadata("geo", geoMetadata),
 	)
@@ -140,21 +149,26 @@ func processActivities(
 		if _, err := writer.Write([]ActivityRow{row}); err != nil {
 			// Close writer before returning so the file is not left open.
 			writer.Close()
-			return fmt.Errorf("write row for activity %d: %w", act.ActivityID, err)
+			return result, fmt.Errorf("write row for activity %d: %w", act.ActivityID, err)
 		}
 		written++
+		if row.ActivityType == "Ride" {
+			result.RideCount++
+		}
 	}
 
 	if err := writer.Close(); err != nil {
-		return fmt.Errorf("close parquet writer: %w", err)
+		return result, fmt.Errorf("close parquet writer: %w", err)
 	}
+
+	result.Parsed = written
 
 	slog.Info("geoparquet written",
 		"path", outPath,
 		"rows", written,
 		"skipped", skipped,
 	)
-	return nil
+	return result, nil
 }
 
 // isSupportedTrack reports whether a filename has a supported GPS format.

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -71,16 +72,38 @@ func TestUploadAndFilter(t *testing.T) {
 		t.Fatalf("upload failed with status %d: %s", rrUpload.Code, body)
 	}
 
-	var uploadResp map[string]string
+	var uploadResp map[string]any
 	if err := json.NewDecoder(rrUpload.Body).Decode(&uploadResp); err != nil {
 		t.Fatal(err)
 	}
 
-	sessionId := uploadResp["sessionId"]
+	sessionId, _ := uploadResp["sessionId"].(string)
 	if sessionId == "" {
 		t.Fatal("expected sessionId, got empty string")
 	}
 
+	if uploadResp["total"] == nil || uploadResp["parsed"] == nil || uploadResp["rideCount"] == nil || uploadResp["summary"] == nil {
+		t.Errorf("missing statistics in upload response: %v", uploadResp)
+	} else {
+		total := uploadResp["total"].(float64)
+		parsed := uploadResp["parsed"].(float64)
+		rideCount := uploadResp["rideCount"].(float64)
+		summary := uploadResp["summary"].(string)
+
+		if parsed != 1146 {
+			t.Errorf("expected 1146 parsed activities, got %.0f", parsed)
+		}
+		if total <= 0 {
+			t.Errorf("expected total > 0, got %.0f", total)
+		}
+		if rideCount <= 0 {
+			t.Errorf("expected rideCount > 0, got %.0f", rideCount)
+		}
+		expectedSummary := fmt.Sprintf("Succesfully parsed %.0f / %.0f  activities. %.0f are type = Ride.", parsed, total, rideCount)
+		if summary != expectedSummary {
+			t.Errorf("expected summary %q, got %q", expectedSummary, summary)
+		}
+	}
 	// Make sure the parquet file was created in tmp
 	parquetPath := filepath.Join("tmp", "activities-"+sessionId+".parquet")
 	defer os.Remove(parquetPath) // cleanup after test

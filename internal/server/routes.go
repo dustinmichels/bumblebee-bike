@@ -67,7 +67,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	out.Close()
 
 	slog.Info("processing upload zip", "sessionId", sessionId, "zipPath", zipPath)
-	err = strava.IngestZip(zipPath, parquetPath)
+	res, err := strava.IngestZip(zipPath, parquetPath)
 	os.Remove(zipPath)
 
 	if err != nil {
@@ -76,11 +76,17 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("ingest succeeded", "sessionId", sessionId, "parquetPath", parquetPath)
+	summary := fmt.Sprintf("Succesfully parsed %d / %d  activities. %d are type = Ride.", res.Parsed, res.Total, res.RideCount)
+	slog.Info(summary, "sessionId", sessionId, "parquetPath", parquetPath)
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":    "success",
 		"sessionId": sessionId,
+		"total":     res.Total,
+		"parsed":    res.Parsed,
+		"rideCount": res.RideCount,
+		"summary":   summary,
 	})
 }
 

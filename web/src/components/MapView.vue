@@ -262,34 +262,26 @@ watch(() => props.showBBox, (newShowBBox) => {
     markers.se.getElement().style.display = display
   }
 }, { immediate: true })
-onMounted(() => {
+const MAP_STYLE = 'https://tiles.openfreemap.org/styles/dark'
+
+const initMap = () => {
   if (!mapContainer.value) return
 
-  // Setup loading timeout fallback (8 seconds)
-  loadTimeout = setTimeout(() => {
-    if (!mapReady.value && !mapError.value) {
-      mapError.value = 'Map loading timed out. The basemap style or tiles could be blocked by your network, ad-blocker, or firewall.'
-    }
-  }, 8000)
+  if (map.value) {
+    map.value.remove()
+    map.value = null
+  }
 
   map.value = new Map({
     container: mapContainer.value,
-    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    style: MAP_STYLE,
     center: props.center,
     zoom: 12,
     attributionControl: false
   })
 
-  // Listen for critical map loading errors
   map.value.on('error', (e) => {
     console.error('MapLibre error:', e)
-    if (!mapReady.value) {
-      const msg = e.error?.message || e.message || ''
-      const isTileError = msg.includes('.mvt') || msg.includes('.pbf') || msg.includes('/tiles/') || msg.includes('/vectortiles/')
-      if (!isTileError && (msg.includes('style') || msg.includes('Source') || msg.includes('Failed to fetch'))) {
-        mapError.value = `Failed to load map resources: ${msg || 'Network error'}`
-      }
-    }
   })
 
   // Add standard navigation controls
@@ -299,9 +291,10 @@ onMounted(() => {
   map.value.on('load', () => {
     if (loadTimeout) {
       clearTimeout(loadTimeout)
+      loadTimeout = null
     }
     if (!map.value) return
-    
+
     // Add bbox layers
     map.value.addSource('bbox-source', {
       type: 'geojson',
@@ -371,6 +364,19 @@ onMounted(() => {
     fitToBBox(0)
     mapReady.value = true
   })
+}
+
+onMounted(() => {
+  if (!mapContainer.value) return
+
+  // Show error if map hasn't loaded after 15s
+  loadTimeout = setTimeout(() => {
+    if (!mapReady.value && !mapError.value) {
+      mapError.value = 'Map loading timed out. The basemap tiles may be blocked by your network or firewall.'
+    }
+  }, 15000)
+
+  initMap()
 })
 
 onUnmounted(() => {

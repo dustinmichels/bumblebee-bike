@@ -20,7 +20,7 @@ func TestIngestZip(t *testing.T) {
 	if _, err := os.Stat(zipPath); os.IsNotExist(err) {
 		t.Skipf("zip not found: %s", zipPath)
 	}
-	if err := strava.IngestZip(zipPath, outputPath); err != nil {
+	if _, err := strava.IngestZip(zipPath, outputPath); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(outputPath)
@@ -38,7 +38,7 @@ func TestIngestDir(t *testing.T) {
 	if _, err := os.Stat(exportDir); os.IsNotExist(err) {
 		t.Skipf("export dir not found: %s", exportDir)
 	}
-	if err := strava.IngestDir(exportDir, outputPath); err != nil {
+	if _, err := strava.IngestDir(exportDir, outputPath); err != nil {
 		t.Fatal(err)
 	}
 

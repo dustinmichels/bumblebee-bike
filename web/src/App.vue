@@ -47,6 +47,9 @@ const isUploading = ref(false)
 const uploadError = ref<string | null>(null)
 const uploadSuccess = ref(false)
 const sessionId = ref<string | null>(null)
+const totalCount = ref<number | null>(null)
+const parsedCount = ref<number | null>(null)
+const rideCount = ref<number | null>(null)
 
 // Filtering state
 const isFiltering = ref(false)
@@ -90,6 +93,9 @@ const submitZip = async () => {
   isUploading.value = true
   uploadError.value = null
   uploadSuccess.value = false
+  totalCount.value = null
+  parsedCount.value = null
+  rideCount.value = null
 
   const formData = new FormData()
   formData.append('file', selectedFile.value)
@@ -105,8 +111,11 @@ const submitZip = async () => {
       throw new Error(text || `Server returned status ${res.status}`)
     }
 
-    const data = await res.json() as { sessionId: string }
+    const data = await res.json() as { sessionId: string; total: number; parsed: number; rideCount: number }
     sessionId.value = data.sessionId
+    totalCount.value = data.total
+    parsedCount.value = data.parsed
+    rideCount.value = data.rideCount
     uploadSuccess.value = true
   } catch (err: any) {
     console.error(err)
@@ -162,6 +171,9 @@ const resetFlow = () => {
   selectedFile.value = null
   uploadSuccess.value = false
   sessionId.value = null
+  totalCount.value = null
+  parsedCount.value = null
+  rideCount.value = null
   activitiesCount.value = null
   activitiesGeoJSON.value = null
   uploadError.value = null
@@ -272,7 +284,10 @@ const resetFlow = () => {
         </div>
 
         <div v-if="uploadSuccess" class="success-banner">
-          ✅ File successfully parsed into GeoParquet! Ready to continue.
+          <div>✅ File successfully parsed into GeoParquet! Ready to continue.</div>
+          <div style="margin-top: 8px; font-weight: 500;">
+            Succesfully parsed {{ parsedCount }} / {{ totalCount }}  activities. {{ rideCount }} are type = Ride.
+          </div>
         </div>
 
         <div class="card-actions">
