@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/parquet-go/parquet-go"
 )
@@ -125,31 +127,96 @@ func processActivities(
 		parquet.KeyValueMetadata("geo", geoMetadata),
 	)
 
-	var written, skipped int
+	type job struct {
+		index int
+		act   Activity
+	}
+
+	type parseResult struct {
+		index int
+		row   *ActivityRow
+	}
+
+	numWorkers := runtime.NumCPU()
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+
+	var filterCount int
 	for _, act := range activities {
+		if act.Filename != nil && isSupportedTrack(*act.Filename) {
+			filterCount++
+		}
+	}
+	if numWorkers > filterCount {
+		numWorkers = filterCount
+	}
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+
+	jobs := make(chan job, filterCount)
+	results := make(chan parseResult, filterCount)
+
+	var wg sync.WaitGroup
+	for range numWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				coords, err := openTrack(*j.act.Filename)
+				if err != nil {
+					slog.Warn("skipping: track read error", "id", j.act.ActivityID, "file", *j.act.Filename, "err", err)
+					results <- parseResult{index: j.index}
+					continue
+				}
+
+				wkb := LineStringWKB(coords)
+				if wkb == nil {
+					slog.Warn("skipping: no GPS data", "id", j.act.ActivityID, "file", *j.act.Filename)
+					results <- parseResult{index: j.index}
+					continue
+				}
+
+				row := activityToRow(j.act, wkb)
+				results <- parseResult{index: j.index, row: &row}
+			}
+		}()
+	}
+
+	// Feed jobs
+	for i, act := range activities {
 		if act.Filename == nil || !isSupportedTrack(*act.Filename) {
 			continue
 		}
+		jobs <- job{index: i, act: act}
+	}
+	close(jobs)
 
-		coords, err := openTrack(*act.Filename)
-		if err != nil {
-			slog.Warn("skipping: track read error", "id", act.ActivityID, "file", *act.Filename, "err", err)
+	// Wait for workers to finish and close results channel
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	parsedRows := make([]*ActivityRow, len(activities))
+	var skipped int
+	for res := range results {
+		if res.row != nil {
+			parsedRows[res.index] = res.row
+		} else {
 			skipped++
+		}
+	}
+
+	var written int
+	for _, row := range parsedRows {
+		if row == nil {
 			continue
 		}
-
-		wkb := LineStringWKB(coords)
-		if wkb == nil {
-			slog.Warn("skipping: no GPS data", "id", act.ActivityID, "file", *act.Filename)
-			skipped++
-			continue
-		}
-
-		row := activityToRow(act, wkb)
-		if _, err := writer.Write([]ActivityRow{row}); err != nil {
-			// Close writer before returning so the file is not left open.
+		if _, err := writer.Write([]ActivityRow{*row}); err != nil {
 			writer.Close()
-			return result, fmt.Errorf("write row for activity %d: %w", act.ActivityID, err)
+			return result, fmt.Errorf("write row for activity %d: %w", row.ActivityID, err)
 		}
 		written++
 		if row.ActivityType == "Ride" {
