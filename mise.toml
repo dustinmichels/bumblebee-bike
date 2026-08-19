@@ -4,13 +4,27 @@ go = "latest"
 air = "latest"
 duckdb = "latest"
 
+# --- Setup & Maintenance ---
+
 [tasks.setup]
 description = "Install DuckDB spatial extension"
 run = "duckdb -c 'INSTALL spatial;'"
-[tasks.build]
-description = "Compile frontend then embed into Go binary"
-depends = ["web-build"]
-run = "go build -o bin/bumblebee-bike ."
+
+[tasks.fmt]
+description = "Format all source code (oxfmt + gofmt)"
+run = [
+  "cd web && bunx oxfmt .",
+  "gofmt -w .",
+]
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = [
+  "rm -rf bin/bumblebee-bike web/dist/*",
+  "touch web/dist/.gitkeep",
+]
+
+# --- Build ---
 
 [tasks.web-build]
 description = "Build the Vue frontend"
@@ -18,6 +32,13 @@ run = [
   "cd web && bun run build",
   "touch web/dist/.gitkeep",
 ]
+
+[tasks.build]
+description = "Compile frontend then embed into Go binary"
+depends = ["web-build"]
+run = "go build -o bin/bumblebee-bike ."
+
+# --- Run ---
 
 [tasks.run]
 description = "Build and run the compiled binary"
@@ -28,23 +49,8 @@ run = "./bin/bumblebee-bike"
 description = "Build and run the compiled binary in test mode"
 depends = ["build"]
 run = "APP_ENV=test ./bin/bumblebee-bike"
-[tasks.dev-backend]
-description = "Start the Go server with live reload (requires air)"
-run = "air"
 
-[tasks.dev-backend-test]
-description = "Start the Go server in test mode with live reload (requires air)"
-run = "APP_ENV=test air"
-[tasks.dev-frontend]
-description = "Start the Vite dev server (proxies /api → :8080)"
-run = "cd web && bun run dev"
-
-[tasks.clean]
-description = "Remove build artifacts"
-run = [
-  "rm -rf bin/bumblebee-bike web/dist/*",
-  "touch web/dist/.gitkeep",
-]
+# --- Development ---
 
 [tasks.dev]
 description = "Run backend and frontend dev servers concurrently"
@@ -61,10 +67,15 @@ trap 'kill 0' SIGINT SIGTERM EXIT
 APP_ENV=test air &
 cd web && bun run dev
 """
-[tasks.fmt]
-description = "Format all source code (oxfmt + gofmt)"
-run = [
-  "cd web && bunx oxfmt .",
-  "gofmt -w .",
-]
 
+[tasks.dev-backend]
+description = "Start the Go server with live reload (requires air)"
+run = "air"
+
+[tasks.dev-backend-test]
+description = "Start the Go server in test mode with live reload (requires air)"
+run = "APP_ENV=test air"
+
+[tasks.dev-frontend]
+description = "Start the Vite dev server (proxies /api → :8080)"
+run = "cd web && bun run dev"
