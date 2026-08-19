@@ -6,10 +6,6 @@ import BBoxCoords from "./components/BBoxCoords.vue";
 const MapView = defineAsyncComponent(() => import("./components/MapView.vue"));
 
 const health = ref<string | null>(null);
-const testMode = ref(false);
-const hasDefaultZip = ref(false);
-const hasDefaultParquet = ref(false);
-const selectedSource = ref<"parquet" | "zip" | "upload">("upload");
 
 // Default location: Boston, MA, USA
 const cityName = ref("Boston, MA, USA");
@@ -21,30 +17,8 @@ onMounted(async () => {
     const res = await fetch("/api/health");
     const data = (await res.json()) as {
       status: string;
-      testMode?: boolean;
-      hasDefaultZip?: boolean;
-      hasDefaultParquet?: boolean;
     };
     health.value = data.status;
-    if (data.testMode) {
-      testMode.value = true;
-      hasDefaultZip.value = !!data.hasDefaultZip;
-      hasDefaultParquet.value = !!data.hasDefaultParquet;
-
-      // Default bounding box for test mode: -71.1637, 42.2951, -71.0068, 42.3969
-      bbox.value = [-71.1637, 42.2951, -71.0068, 42.3969];
-      center.value = [-71.08525, 42.346];
-      cityName.value = "Boston, MA (Test Area)";
-
-      // Select default source
-      if (hasDefaultParquet.value) {
-        selectedSource.value = "parquet";
-      } else if (hasDefaultZip.value) {
-        selectedSource.value = "zip";
-      } else {
-        selectedSource.value = "upload";
-      }
-    }
   } catch {
     health.value = "unreachable";
   }
@@ -119,7 +93,7 @@ const formatSize = (bytes: number) => {
 };
 
 const submitZip = async () => {
-  if (selectedSource.value === "upload" && !selectedFile.value) return;
+  if (!selectedFile.value) return;
   isUploading.value = true;
   uploadError.value = null;
   uploadSuccess.value = false;
@@ -128,23 +102,13 @@ const submitZip = async () => {
   rideCount.value = null;
 
   try {
-    let res: Response;
-    if (selectedSource.value === "parquet") {
-      res = await fetch("/api/upload?useDefaultParquet=true", {
-        method: "POST",
-      });
-    } else if (selectedSource.value === "zip") {
-      res = await fetch("/api/upload?useDefaultZip=true", {
-        method: "POST",
-      });
-    } else {
-      const formData = new FormData();
-      formData.append("file", selectedFile.value!);
-      res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-    }
+    const formData = new FormData();
+    formData.append("file", selectedFile.value);
+
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
 
     if (!res.ok) {
       const text = await res.text();
@@ -206,28 +170,8 @@ const filterActivities = async () => {
 };
 
 watch(currentStep, (newStep) => {
-  if (newStep === 2) {
-    if (testMode.value && selectedSource.value === "parquet" && !uploadSuccess.value) {
-      submitZip();
-    }
-  }
   if (newStep === 4) {
     filterActivities();
-  }
-});
-
-watch(selectedSource, (newSource) => {
-  // Reset upload state when source changes
-  uploadSuccess.value = false;
-  sessionId.value = null;
-  totalCount.value = null;
-  parsedCount.value = null;
-  rideCount.value = null;
-  uploadError.value = null;
-
-  // If changing back to parquet in Step 2, auto-submit
-  if (newSource === "parquet" && currentStep.value === 2) {
-    submitZip();
   }
 });
 
@@ -243,17 +187,6 @@ const resetFlow = () => {
   activitiesGeoJSON.value = null;
   uploadError.value = null;
   filterError.value = null;
-  if (testMode.value) {
-    if (hasDefaultParquet.value) {
-      selectedSource.value = "parquet";
-    } else if (hasDefaultZip.value) {
-      selectedSource.value = "zip";
-    } else {
-      selectedSource.value = "upload";
-    }
-  } else {
-    selectedSource.value = "upload";
-  }
 };
 </script>
 
@@ -357,70 +290,7 @@ const resetFlow = () => {
           GeoParquet file.
         </p>
 
-        <!-- Test Mode Source Selector -->
-        <div v-if="testMode" class="test-mode-selector">
-          <div class="test-mode-badge">🛠️ Test Mode Active</div>
-          <p class="test-mode-intro">Select your data source for testing:</p>
-          <div class="test-options">
-            <label
-              class="test-option-card"
-              :class="{ selected: selectedSource === 'parquet', disabled: !hasDefaultParquet }"
-            >
-              <input
-                type="radio"
-                name="dataSource"
-                value="parquet"
-                v-model="selectedSource"
-                :disabled="!hasDefaultParquet"
-              />
-              <div class="option-details">
-                <span class="option-title">Use pre-generated activities.parquet (Instant)</span>
-                <span class="option-desc" v-if="hasDefaultParquet"
-                  >Uses the pre-parsed dataset in <code>data/activities.parquet</code>.</span
-                >
-                <span class="option-desc error-text" v-else
-                  >File <code>data/activities.parquet</code> not found on server.</span
-                >
-              </div>
-            </label>
-
-            <label
-              class="test-option-card"
-              :class="{ selected: selectedSource === 'zip', disabled: !hasDefaultZip }"
-            >
-              <input
-                type="radio"
-                name="dataSource"
-                value="zip"
-                v-model="selectedSource"
-                :disabled="!hasDefaultZip"
-              />
-              <div class="option-details">
-                <span class="option-title">Use default strava_export.zip</span>
-                <span class="option-desc" v-if="hasDefaultZip"
-                  >Parses the zip dataset in <code>data/strava_export.zip</code>.</span
-                >
-                <span class="option-desc error-text" v-else
-                  >File <code>data/strava_export.zip</code> not found on server.</span
-                >
-              </div>
-            </label>
-
-            <label class="test-option-card" :class="{ selected: selectedSource === 'upload' }">
-              <input type="radio" name="dataSource" value="upload" v-model="selectedSource" />
-              <div class="option-details">
-                <span class="option-title">Upload a custom ZIP</span>
-                <span class="option-desc"
-                  >Manually choose or drag a ZIP file from your computer.</span
-                >
-              </div>
-            </label>
-          </div>
-        </div>
-
-        <!-- Custom ZIP Upload Zone -->
         <div
-          v-if="selectedSource === 'upload'"
           class="upload-zone"
           :class="{ dragging: isDraggingFile }"
           @dragover.prevent="isDraggingFile = true"
@@ -441,36 +311,6 @@ const resetFlow = () => {
             >
             <span v-else>Click to choose file or drag it here</span>
           </label>
-        </div>
-
-        <!-- Default ZIP / Parquet Selected Info -->
-        <div v-else class="test-selected-info">
-          <div v-if="selectedSource === 'parquet'" class="info-details">
-            <span class="info-icon">⚡</span>
-            <div>
-              <strong>Pre-generated dataset selected:</strong> <code>data/activities.parquet</code>
-              <p class="sub-desc" v-if="uploadSuccess">
-                Successfully loaded into test session: <code>{{ sessionId }}</code
-                >.
-              </p>
-              <p class="sub-desc" v-else-if="isUploading">Initializing test session...</p>
-              <p class="sub-desc" v-else>Ready to load.</p>
-            </div>
-          </div>
-          <div v-else-if="selectedSource === 'zip'" class="info-details">
-            <span class="info-icon">📦</span>
-            <div>
-              <strong>Default zip archive selected:</strong> <code>data/strava_export.zip</code>
-              <p class="sub-desc" v-if="uploadSuccess">
-                Successfully parsed into test session: <code>{{ sessionId }}</code
-                >.
-              </p>
-              <p class="sub-desc" v-else-if="isUploading">
-                Parsing default zip archive (this will take a few seconds)...
-              </p>
-              <p class="sub-desc" v-else>Click <strong>Submit</strong> to parse the archive.</p>
-            </div>
-          </div>
         </div>
 
         <div v-if="uploadError" class="error-banner">⚠️ {{ uploadError }}</div>
@@ -498,9 +338,7 @@ const resetFlow = () => {
           <button
             @click="submitZip"
             class="btn btn-primary"
-            :disabled="
-              (selectedSource === 'upload' && !selectedFile) || isUploading || uploadSuccess
-            "
+            :disabled="!selectedFile || isUploading || uploadSuccess"
           >
             Submit
           </button>
@@ -1068,107 +906,5 @@ code {
 .final-card {
   display: flex;
   flex-direction: column;
-}
-.test-mode-selector {
-  background: rgba(245, 158, 11, 0.05);
-  border: 1px solid rgba(245, 158, 11, 0.2);
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 20px;
-}
-.test-mode-badge {
-  display: inline-block;
-  background: #f59e0b;
-  color: #000;
-  font-weight: bold;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.test-mode-intro {
-  margin: 0 0 12px 0;
-  font-size: 14px;
-  color: #ccc;
-  text-align: left;
-}
-.test-options {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  text-align: left;
-}
-.test-option-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px;
-  background: #1e1e1e;
-  border: 1px solid #333;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.test-option-card:hover:not(.disabled) {
-  border-color: #555;
-  background: #252525;
-}
-.test-option-card.selected {
-  border-color: #f59e0b;
-  background: rgba(245, 158, 11, 0.08);
-}
-.test-option-card.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.test-option-card input[type="radio"] {
-  margin-top: 4px;
-}
-.option-details {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.option-title {
-  font-weight: 600;
-  color: #fff;
-  font-size: 14px;
-}
-.option-desc {
-  font-size: 12px;
-  color: #aaa;
-}
-.option-desc code {
-  background: rgba(255, 255, 255, 0.1);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-family: monospace;
-}
-.error-text {
-  color: #ef4444;
-}
-.test-selected-info {
-  background: #1a1a1a;
-  border: 1px dashed #444;
-  border-radius: 8px;
-  padding: 24px;
-  margin-bottom: 20px;
-  text-align: left;
-}
-.info-details {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  color: #ddd;
-}
-.info-icon {
-  font-size: 24px;
-}
-.sub-desc {
-  margin: 4px 0 0 0;
-  font-size: 13px;
-  color: #aaa;
 }
 </style>

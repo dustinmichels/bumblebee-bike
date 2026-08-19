@@ -56,54 +56,29 @@ const getBBoxGeoJSON = (bboxVal: [number, number, number, number]) => {
     },
   };
 };
-const convertToPoints = (geojson: any) => {
-  if (!geojson || !geojson.features) return geojson;
-  const pointsFeatures: any[] = [];
-  for (const feature of geojson.features) {
-    const geom = feature.geometry;
-    if (!geom) continue;
+const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] as any[] };
 
-    const addPoint = (coords: [number, number]) => {
-      pointsFeatures.push({
-        type: "Feature",
-        properties: { ...feature.properties },
-        geometry: {
-          type: "Point",
-          coordinates: coords,
-        },
-      });
-    };
+const addActivitiesLayer = (data: any) => {
+  if (!map.value) return;
 
-    if (geom.type === "LineString" && Array.isArray(geom.coordinates)) {
-      for (const coords of geom.coordinates) {
-        if (Array.isArray(coords) && coords.length >= 2) {
-          addPoint(coords as [number, number]);
-        }
-      }
-    } else if (geom.type === "MultiLineString" && Array.isArray(geom.coordinates)) {
-      for (const line of geom.coordinates) {
-        if (Array.isArray(line)) {
-          for (const coords of line) {
-            if (Array.isArray(coords) && coords.length >= 2) {
-              addPoint(coords as [number, number]);
-            }
-          }
-        }
-      }
-    } else if (geom.type === "Point" && Array.isArray(geom.coordinates)) {
-      pointsFeatures.push(feature);
-    } else if (geom.type === "MultiPoint" && Array.isArray(geom.coordinates)) {
-      for (const coords of geom.coordinates) {
-        if (Array.isArray(coords) && coords.length >= 2) {
-          addPoint(coords as [number, number]);
-        }
-      }
-    }
-  }
-  return {
-    type: "FeatureCollection",
-    features: pointsFeatures,
-  };
+  map.value.addSource("activities-source", {
+    type: "geojson",
+    data,
+  });
+  map.value.addLayer({
+    id: "activities-layer",
+    type: "line",
+    source: "activities-source",
+    layout: {
+      "line-join": "round",
+      "line-cap": "round",
+    },
+    paint: {
+      "line-color": "#ff6600",
+      "line-width": 2.5,
+      "line-opacity": 0.95,
+    },
+  });
 };
 
 const createMarkerEl = (label: string) => {
@@ -285,27 +260,12 @@ watch(
     if (!map.value || !mapReady.value) return;
 
     const source = map.value.getSource("activities-source") as GeoJSONSource | undefined;
-    const data = newGeoJSON
-      ? convertToPoints(newGeoJSON)
-      : { type: "FeatureCollection", features: [] };
+    const data = newGeoJSON ?? EMPTY_FEATURE_COLLECTION;
 
     if (source) {
       source.setData(data);
     } else if (newGeoJSON) {
-      map.value.addSource("activities-source", {
-        type: "geojson",
-        data: data,
-      });
-      map.value.addLayer({
-        id: "activities-layer",
-        type: "circle",
-        source: "activities-source",
-        paint: {
-          "circle-color": "#ff6600",
-          "circle-radius": 2.5,
-          "circle-opacity": 0.65,
-        },
-      });
+      addActivitiesLayer(data);
     }
   },
   { immediate: true },
@@ -411,23 +371,11 @@ const initMap = () => {
 
     // Apply initial activities
     if (props.activitiesGeoJSON) {
-      const data = convertToPoints(props.activitiesGeoJSON);
-      map.value.addSource("activities-source", {
-        type: "geojson",
-        data: data,
-      });
-      map.value.addLayer({
-        id: "activities-layer",
-        type: "circle",
-        source: "activities-source",
-        paint: {
-          "circle-color": "#ff6600",
-          "circle-radius": 2.5,
-          "circle-opacity": 0.65,
-        },
-      });
+      addActivitiesLayer(props.activitiesGeoJSON);
     }
 
+    (window as any).mapInstance = map.value;
+    (window as any).mapProps = props;
     map.value.resize();
     fitToBBox(0);
     mapReady.value = true;

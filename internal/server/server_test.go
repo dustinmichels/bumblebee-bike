@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 )
 
 func TestHealth(t *testing.T) {
@@ -30,6 +31,62 @@ func TestHealth(t *testing.T) {
 
 	if resp["status"] != "ok" {
 		t.Errorf("expected status 'ok', got %q", resp["status"])
+	}
+	if len(resp) != 1 {
+		t.Errorf("expected health response to contain only status, got %v", resp)
+	}
+}
+
+func TestMapTestUnavailableOutsideTestMode(t *testing.T) {
+	t.Setenv("APP_ENV", "")
+	t.Setenv("ENV", "")
+	t.Setenv("TEST_MODE", "")
+
+	router := apiRouter()
+	req := httptest.NewRequest("GET", "/map-test", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", rr.Code)
+	}
+}
+
+func TestSPARejectsMapTestOutsideTestMode(t *testing.T) {
+	t.Setenv("APP_ENV", "")
+	t.Setenv("ENV", "")
+	t.Setenv("TEST_MODE", "")
+
+	fsys := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("index")},
+	}
+	handler := spaHandler(fsys)
+
+	req := httptest.NewRequest("GET", "/map-test", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", rr.Code)
+	}
+}
+
+func TestSPAAllowsMapTestInTestMode(t *testing.T) {
+	t.Setenv("APP_ENV", "test")
+	t.Setenv("ENV", "")
+	t.Setenv("TEST_MODE", "")
+
+	fsys := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("index")},
+	}
+	handler := spaHandler(fsys)
+
+	req := httptest.NewRequest("GET", "/map-test", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
 	}
 }
 
