@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, shallowRef, onMounted, onUnmounted, watch } from "vue";
 import { Loader2 } from "lucide-vue-next";
-import { Map, Marker, NavigationControl, AttributionControl, setWorkerUrl } from "maplibre-gl";
+import { onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
+import { AttributionControl, Map, Marker, NavigationControl, setWorkerUrl } from "maplibre-gl";
 import type { GeoJSONSource } from "maplibre-gl";
+import type { BBox, LngLat, RouteLayer } from "../lib/activity";
+import { EMPTY_FEATURE_COLLECTION } from "../lib/activity";
 import "maplibre-gl/dist/maplibre-gl.css";
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 
@@ -10,26 +12,28 @@ setWorkerUrl(maplibreWorkerUrl);
 
 const props = withDefaults(
   defineProps<{
-    bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
-    center: [number, number]; // [lng, lat]
-    activitiesGeoJSON?: any;
+    bbox: BBox;
+    center: LngLat;
+    routes?: RouteLayer[];
     showBBox?: boolean;
   }>(),
   {
-    activitiesGeoJSON: null,
+    routes: () => [],
     showBBox: true,
   },
 );
 
 const emit = defineEmits<{
-  (e: "update:bbox", bbox: [number, number, number, number]): void;
+  (event: "update:bbox", bbox: BBox): void;
 }>();
+
 const mapContainer = ref<HTMLElement | null>(null);
 const map = shallowRef<Map | null>(null);
 const isDragging = ref(false);
 const mapReady = ref(false);
 const mapError = ref<string | null>(null);
-let loadTimeout: any = null;
+const renderedRouteIds = new Set<string>();
+let loadTimeout: ReturnType<typeof setTimeout> | null = null;
 let markers: {
   sw: Marker;
   nw: Marker;
@@ -37,8 +41,8 @@ let markers: {
   se: Marker;
 } | null = null;
 
-const getBBoxGeoJSON = (bboxVal: [number, number, number, number]) => {
-  const [minLng, minLat, maxLng, maxLat] = bboxVal;
+const getBBoxGeoJSON = (bboxValue: BBox) => {
+  const [minLng, minLat, maxLng, maxLat] = bboxValue;
   return {
     type: "Feature" as const,
     properties: {},
@@ -56,29 +60,75 @@ const getBBoxGeoJSON = (bboxVal: [number, number, number, number]) => {
     },
   };
 };
-const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection", features: [] as any[] };
 
-const addActivitiesLayer = (data: any) => {
-  if (!map.value) return;
+const routeSourceId = (routeId: string) => `route-source-${routeId}`;
+const routeLayerId = (routeId: string) => `route-layer-${routeId}`;
 
-  map.value.addSource("activities-source", {
-    type: "geojson",
-    data,
-  });
-  map.value.addLayer({
-    id: "activities-layer",
-    type: "line",
-    source: "activities-source",
-    layout: {
-      "line-join": "round",
-      "line-cap": "round",
-    },
-    paint: {
-      "line-color": "#ff6600",
-      "line-width": 2.5,
-      "line-opacity": 0.95,
-    },
-  });
+const syncRoutes = () => {
+  if (!map.value || !mapReady.value) {
+    return;
+  }
+
+  const nextRouteIds = new Set<string>();
+
+  for (const route of props.routes) {
+    nextRouteIds.add(route.id);
+
+    const sourceId = routeSourceId(route.id);
+    const layerId = routeLayerId(route.id);
+    const data = route.data ?? EMPTY_FEATURE_COLLECTION;
+    const source = map.value.getSource(sourceId) as GeoJSONSource | undefined;
+
+    if (source) {
+      source.setData(data);
+    } else {
+      map.value.addSource(sourceId, {
+        type: "geojson",
+        data,
+      });
+    }
+
+    if (map.value.getLayer(layerId)) {
+      map.value.setPaintProperty(layerId, "line-color", route.color);
+      continue;
+    }
+
+    map.value.addLayer({
+      id: layerId,
+      type: "line",
+      source: sourceId,
+      layout: {
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": route.color,
+        "line-width": 2.5,
+        "line-opacity": 0.95,
+      },
+    });
+  }
+
+  for (const routeId of renderedRouteIds) {
+    if (nextRouteIds.has(routeId)) {
+      continue;
+    }
+
+    const layerId = routeLayerId(routeId);
+    const sourceId = routeSourceId(routeId);
+
+    if (map.value.getLayer(layerId)) {
+      map.value.removeLayer(layerId);
+    }
+    if (map.value.getSource(sourceId)) {
+      map.value.removeSource(sourceId);
+    }
+  }
+
+  renderedRouteIds.clear();
+  for (const routeId of nextRouteIds) {
+    renderedRouteIds.add(routeId);
+  }
 };
 
 const createMarkerEl = (label: string) => {
@@ -111,7 +161,9 @@ const createMarkerEl = (label: string) => {
 };
 
 const handleDrag = (corner: "sw" | "nw" | "ne" | "se") => {
-  if (!markers || !map.value) return;
+  if (!markers || !map.value) {
+    return;
+  }
 
   const swLngLat = markers.sw.getLngLat();
   const nwLngLat = markers.nw.getLngLat();
@@ -119,7 +171,7 @@ const handleDrag = (corner: "sw" | "nw" | "ne" | "se") => {
   const seLngLat = markers.se.getLngLat();
 
   let [minLng, minLat, maxLng, maxLat] = props.bbox;
-  const epsilon = 0.0002; // minimum width/height (~20 meters)
+  const epsilon = 0.0002;
 
   if (corner === "sw") {
     minLng = Math.min(swLngLat.lng, maxLng - epsilon);
@@ -139,7 +191,7 @@ const handleDrag = (corner: "sw" | "nw" | "ne" | "se") => {
     markers.ne.setLngLat([maxLng, maxLat]);
     markers.nw.setLngLat([minLng, maxLat]);
     markers.se.setLngLat([maxLng, minLat]);
-  } else if (corner === "se") {
+  } else {
     maxLng = Math.max(seLngLat.lng, minLng + epsilon);
     minLat = Math.min(seLngLat.lat, maxLat - epsilon);
     markers.se.setLngLat([maxLng, minLat]);
@@ -147,7 +199,7 @@ const handleDrag = (corner: "sw" | "nw" | "ne" | "se") => {
     markers.ne.setLngLat([maxLng, maxLat]);
   }
 
-  const updatedBBox: [number, number, number, number] = [minLng, minLat, maxLng, maxLat];
+  const updatedBBox: BBox = [minLng, minLat, maxLng, maxLat];
   emit("update:bbox", updatedBBox);
 
   const source = map.value.getSource("bbox-source") as GeoJSONSource | undefined;
@@ -156,14 +208,11 @@ const handleDrag = (corner: "sw" | "nw" | "ne" | "se") => {
   }
 };
 
-const handleDragEnd = () => {
-  isDragging.value = false;
-};
-
 const setupMarkers = () => {
-  if (!map.value) return;
+  if (!map.value) {
+    return;
+  }
 
-  // Remove existing markers if any
   if (markers) {
     markers.sw.remove();
     markers.nw.remove();
@@ -176,15 +225,12 @@ const setupMarkers = () => {
   const sw = new Marker({ element: createMarkerEl("Southwest"), draggable: true })
     .setLngLat([minLng, minLat])
     .addTo(map.value);
-
   const nw = new Marker({ element: createMarkerEl("Northwest"), draggable: true })
     .setLngLat([minLng, maxLat])
     .addTo(map.value);
-
   const ne = new Marker({ element: createMarkerEl("Northeast"), draggable: true })
     .setLngLat([maxLng, maxLat])
     .addTo(map.value);
-
   const se = new Marker({ element: createMarkerEl("Southeast"), draggable: true })
     .setLngLat([maxLng, minLat])
     .addTo(map.value);
@@ -194,51 +240,75 @@ const setupMarkers = () => {
   sw.on("dragstart", () => {
     isDragging.value = true;
   });
-  sw.on("drag", () => handleDrag("sw"));
-  sw.on("dragend", handleDragEnd);
+  sw.on("drag", () => {
+    handleDrag("sw");
+  });
+  sw.on("dragend", () => {
+    isDragging.value = false;
+  });
 
   nw.on("dragstart", () => {
     isDragging.value = true;
   });
-  nw.on("drag", () => handleDrag("nw"));
-  nw.on("dragend", handleDragEnd);
+  nw.on("drag", () => {
+    handleDrag("nw");
+  });
+  nw.on("dragend", () => {
+    isDragging.value = false;
+  });
 
   ne.on("dragstart", () => {
     isDragging.value = true;
   });
-  ne.on("drag", () => handleDrag("ne"));
-  ne.on("dragend", handleDragEnd);
+  ne.on("drag", () => {
+    handleDrag("ne");
+  });
+  ne.on("dragend", () => {
+    isDragging.value = false;
+  });
 
   se.on("dragstart", () => {
     isDragging.value = true;
   });
-  se.on("drag", () => handleDrag("se"));
-  se.on("dragend", handleDragEnd);
+  se.on("drag", () => {
+    handleDrag("se");
+  });
+  se.on("dragend", () => {
+    isDragging.value = false;
+  });
 };
 
 const fitToBBox = (duration = 1000) => {
-  if (!map.value) return;
+  if (!map.value) {
+    return;
+  }
+
   const [minLng, minLat, maxLng, maxLat] = props.bbox;
-  map.value.fitBounds([minLng, minLat, maxLng, maxLat], { padding: 60, maxZoom: 14, duration });
+  map.value.fitBounds([minLng, minLat, maxLng, maxLat], {
+    padding: 60,
+    maxZoom: 14,
+    duration,
+  });
 };
 
-// Watchers for outside changes
 watch(
   () => props.bbox,
   (newBBox) => {
-    if (isDragging.value) return;
+    if (isDragging.value || !map.value) {
+      return;
+    }
 
-    if (markers && map.value) {
+    if (markers) {
       const [minLng, minLat, maxLng, maxLat] = newBBox;
       markers.sw.setLngLat([minLng, minLat]);
       markers.nw.setLngLat([minLng, maxLat]);
       markers.ne.setLngLat([maxLng, maxLat]);
       markers.se.setLngLat([maxLng, minLat]);
+    }
 
-      const source = map.value.getSource("bbox-source") as GeoJSONSource | undefined;
-      if (source) {
-        source.setData(getBBoxGeoJSON(newBBox));
-      }
+    const source = map.value.getSource("bbox-source") as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(getBBoxGeoJSON(newBBox));
     }
   },
   { deep: true },
@@ -255,36 +325,28 @@ watch(
 );
 
 watch(
-  () => props.activitiesGeoJSON,
-  (newGeoJSON) => {
-    if (!map.value || !mapReady.value) return;
-
-    const source = map.value.getSource("activities-source") as GeoJSONSource | undefined;
-    const data = newGeoJSON ?? EMPTY_FEATURE_COLLECTION;
-
-    if (source) {
-      source.setData(data);
-    } else if (newGeoJSON) {
-      addActivitiesLayer(data);
-    }
+  () => props.routes,
+  () => {
+    syncRoutes();
   },
-  { immediate: true },
+  { deep: true, immediate: true },
 );
 
 watch(
   () => props.showBBox,
-  (newShowBBox) => {
-    if (!map.value || !mapReady.value) return;
+  (showBBox) => {
+    if (!map.value || !mapReady.value) {
+      return;
+    }
 
-    const layers = ["bbox-fill", "bbox-line"];
-    for (const layer of layers) {
-      if (map.value.getLayer(layer)) {
-        map.value.setLayoutProperty(layer, "visibility", newShowBBox ? "visible" : "none");
+    for (const layerId of ["bbox-fill", "bbox-line"]) {
+      if (map.value.getLayer(layerId)) {
+        map.value.setLayoutProperty(layerId, "visibility", showBBox ? "visible" : "none");
       }
     }
 
     if (markers) {
-      const display = newShowBBox ? "block" : "none";
+      const display = showBBox ? "block" : "none";
       markers.sw.getElement().style.display = display;
       markers.nw.getElement().style.display = display;
       markers.ne.getElement().style.display = display;
@@ -293,10 +355,13 @@ watch(
   },
   { immediate: true },
 );
+
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/dark";
 
 const initMap = () => {
-  if (!mapContainer.value) return;
+  if (!mapContainer.value) {
+    return;
+  }
 
   if (map.value) {
     map.value.remove();
@@ -311,11 +376,10 @@ const initMap = () => {
     attributionControl: false,
   });
 
-  map.value.on("error", (e) => {
-    console.error("MapLibre error:", e);
+  map.value.on("error", (event) => {
+    console.error("MapLibre error:", event);
   });
 
-  // Add standard navigation controls
   map.value.addControl(new NavigationControl(), "top-right");
   map.value.addControl(new AttributionControl({ compact: true }), "bottom-right");
 
@@ -324,9 +388,10 @@ const initMap = () => {
       clearTimeout(loadTimeout);
       loadTimeout = null;
     }
-    if (!map.value) return;
+    if (!map.value) {
+      return;
+    }
 
-    // Add bbox layers
     map.value.addSource("bbox-source", {
       type: "geojson",
       data: getBBoxGeoJSON(props.bbox),
@@ -348,19 +413,24 @@ const initMap = () => {
       source: "bbox-source",
       paint: {
         "line-color": "#ff9900",
-        "line-width": 3.0,
+        "line-width": 3,
       },
     });
 
     setupMarkers();
+    mapReady.value = true;
+    syncRoutes();
 
-    // Apply initial visibility
-    const layers = ["bbox-fill", "bbox-line"];
-    for (const layer of layers) {
-      if (map.value.getLayer(layer)) {
-        map.value.setLayoutProperty(layer, "visibility", props.showBBox ? "visible" : "none");
+    for (const layerId of ["bbox-fill", "bbox-line"]) {
+      if (map.value.getLayer(layerId)) {
+        map.value.setLayoutProperty(
+          layerId,
+          "visibility",
+          props.showBBox ? "visible" : "none",
+        );
       }
     }
+
     if (markers) {
       const display = props.showBBox ? "block" : "none";
       markers.sw.getElement().style.display = display;
@@ -369,23 +439,16 @@ const initMap = () => {
       markers.se.getElement().style.display = display;
     }
 
-    // Apply initial activities
-    if (props.activitiesGeoJSON) {
-      addActivitiesLayer(props.activitiesGeoJSON);
-    }
-
-    (window as any).mapInstance = map.value;
-    (window as any).mapProps = props;
     map.value.resize();
     fitToBBox(0);
-    mapReady.value = true;
   });
 };
 
 onMounted(() => {
-  if (!mapContainer.value) return;
+  if (!mapContainer.value) {
+    return;
+  }
 
-  // Show error if map hasn't loaded after 15s
   loadTimeout = setTimeout(() => {
     if (!mapReady.value && !mapError.value) {
       mapError.value =
@@ -400,6 +463,7 @@ onUnmounted(() => {
   if (loadTimeout) {
     clearTimeout(loadTimeout);
   }
+
   if (map.value) {
     map.value.remove();
   }
@@ -421,7 +485,7 @@ onUnmounted(() => {
       </div>
     </Transition>
     <div v-if="mapReady" class="map-actions">
-      <button @click="fitToBBox()" class="fit-btn" title="Refit map to current bounding box">
+      <button class="fit-btn" title="Refit map to current bounding box" @click="fitToBBox()">
         🔍 Recenter Box
       </button>
     </div>
@@ -457,6 +521,7 @@ onUnmounted(() => {
   font-size: 13px;
   z-index: 10;
 }
+
 .map-error-overlay {
   position: absolute;
   inset: 0;
@@ -507,6 +572,7 @@ onUnmounted(() => {
 .map-fade-leave-active {
   transition: opacity 0.3s ease;
 }
+
 .map-fade-leave-to {
   opacity: 0;
 }
@@ -541,7 +607,6 @@ onUnmounted(() => {
   border-color: #ff9900;
 }
 
-/* Custom Marker styles override standard maplibre structures if needed */
 :deep(.mapboxgl-marker) {
   z-index: 10;
 }

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from "vue";
+import { onUnmounted, ref, watch } from "vue";
 
 interface NominatimResult {
   place_id: number;
-  boundingbox: string[]; // [minlat, maxlat, minlon, maxlon]
+  boundingbox: string[];
   lat: string;
   lon: string;
   display_name: string;
@@ -11,10 +11,10 @@ interface NominatimResult {
 
 const emit = defineEmits<{
   (
-    e: "select-city",
+    event: "select-city",
     payload: {
       name: string;
-      bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
+      bbox: [number, number, number, number];
       lat: number;
       lon: number;
     },
@@ -27,31 +27,36 @@ const loading = ref(false);
 const showError = ref(false);
 let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 let latestRequestId = 0;
+let suppressNextWatch = false;
 
-const searchCities = async (val: string) => {
-  if (!val.trim()) {
+const searchCities = async (value: string) => {
+  if (!value.trim()) {
     suggestions.value = [];
     return;
   }
+
   const currentRequestId = ++latestRequestId;
   loading.value = true;
   showError.value = false;
+
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&limit=6`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&limit=6`;
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "BumblebeeBike-App/1.0",
+        "User-Agent": "MapTools-App/1.0",
       },
     });
-    if (!res.ok) throw new Error("Search failed");
-    const data = (await res.json()) as NominatimResult[];
+    if (!res.ok) {
+      throw new Error("Search failed");
+    }
 
+    const data = (await res.json()) as NominatimResult[];
     if (currentRequestId === latestRequestId) {
       suggestions.value = data;
     }
-  } catch (err) {
+  } catch (error) {
     if (currentRequestId === latestRequestId) {
-      console.error(err);
+      console.error(error);
       showError.value = true;
     }
   } finally {
@@ -61,29 +66,32 @@ const searchCities = async (val: string) => {
   }
 };
 
-let suppressNextWatch = false;
-
-watch(query, (newVal) => {
-  if (debounceTimeout) clearTimeout(debounceTimeout);
+watch(query, (value) => {
+  if (debounceTimeout) {
+    clearTimeout(debounceTimeout);
+  }
   if (suppressNextWatch) {
     suppressNextWatch = false;
     return;
   }
-  if (!newVal.trim()) {
+  if (!value.trim()) {
     suggestions.value = [];
     return;
   }
+
   debounceTimeout = setTimeout(() => {
-    searchCities(newVal);
+    void searchCities(value);
   }, 400);
 });
 
 onUnmounted(() => {
-  if (debounceTimeout) clearTimeout(debounceTimeout);
+  if (debounceTimeout) {
+    clearTimeout(debounceTimeout);
+  }
 });
 
 const selectSuggestion = (item: NominatimResult) => {
-  latestRequestId++; // Invalidate any in-flight fetch requests
+  latestRequestId += 1;
   suppressNextWatch = true;
   query.value = item.display_name;
   suggestions.value = [];
@@ -102,7 +110,7 @@ const selectSuggestion = (item: NominatimResult) => {
 };
 
 const clearInput = () => {
-  latestRequestId++; // Invalidate any in-flight fetch requests
+  latestRequestId += 1;
   query.value = "";
   suggestions.value = [];
 };
@@ -119,7 +127,7 @@ const clearInput = () => {
       />
       <div class="input-actions">
         <span v-if="loading" class="spinner"></span>
-        <button v-else-if="query" @click="clearInput" class="clear-btn" title="Clear input">
+        <button v-else-if="query" class="clear-btn" title="Clear input" @click="clearInput">
           &times;
         </button>
       </div>
@@ -129,17 +137,15 @@ const clearInput = () => {
       <li
         v-for="item in suggestions"
         :key="item.place_id"
-        @click="selectSuggestion(item)"
         class="suggestion-item"
+        @click="selectSuggestion(item)"
       >
         <span class="pin-icon">📍</span>
         <span class="display-name">{{ item.display_name }}</span>
       </li>
     </ul>
 
-    <div v-if="showError" class="error-message">
-      Could not fetch search results. Please try again.
-    </div>
+    <div v-if="showError" class="error-message">Could not fetch search results. Please try again.</div>
   </div>
 </template>
 
@@ -217,7 +223,7 @@ const clearInput = () => {
   top: 100%;
   left: 0;
   right: 0;
-  margin: 4px 0 0 0;
+  margin: 4px 0 0;
   padding: 0;
   background: #1e1e1e;
   border: 1px solid #333;
@@ -261,11 +267,12 @@ const clearInput = () => {
 .error-message {
   margin-top: 8px;
   color: #ff4444;
-  font-size: 14px;
-  text-align: center;
 }
 
 @keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
   to {
     transform: rotate(360deg);
   }

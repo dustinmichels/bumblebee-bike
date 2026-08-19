@@ -1,467 +1,61 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, defineAsyncComponent } from "vue";
-import SearchCity from "./components/SearchCity.vue";
-import BBoxCoords from "./components/BBoxCoords.vue";
+import { onMounted, ref } from "vue";
+import CompareFlow from "./components/flows/CompareFlow.vue";
+import LightningMapFlow from "./components/flows/LightningMapFlow.vue";
+import FunctionHome from "./components/home/FunctionHome.vue";
 
-const MapView = defineAsyncComponent(() => import("./components/MapView.vue"));
+type ToolKey = "home" | "lightning-map" | "compare";
 
+const activeTool = ref<ToolKey>("home");
 const health = ref<string | null>(null);
-
-// Default location: Boston, MA, USA
-const cityName = ref("Boston, MA, USA");
-const bbox = ref<[number, number, number, number]>([-71.1912, 42.2279, -70.9227, 42.3969]);
-const center = ref<[number, number]>([-71.0589, 42.3601]);
 
 onMounted(async () => {
   try {
     const res = await fetch("/api/health");
-    const data = (await res.json()) as {
-      status: string;
-    };
+    const data = (await res.json()) as { status: string };
     health.value = data.status;
   } catch {
     health.value = "unreachable";
   }
 });
-
-const handleSelectCity = (payload: {
-  name: string;
-  bbox: [number, number, number, number];
-  lat: number;
-  lon: number;
-}) => {
-  cityName.value = payload.name;
-  bbox.value = payload.bbox;
-  center.value = [payload.lon, payload.lat];
-};
-
-const currentStep = ref(0);
-const steps = [
-  { number: 1, label: "Export" },
-  { number: 2, label: "Upload" },
-  { number: 3, label: "Area" },
-  { number: 4, label: "Process" },
-  { number: 5, label: "Map" },
-];
-
-// Zip Upload state
-const selectedFile = ref<File | null>(null);
-const isDraggingFile = ref(false);
-const isUploading = ref(false);
-const uploadError = ref<string | null>(null);
-const uploadSuccess = ref(false);
-const sessionId = ref<string | null>(null);
-const totalCount = ref<number | null>(null);
-const parsedCount = ref<number | null>(null);
-const rideCount = ref<number | null>(null);
-
-// Filtering state
-const isFiltering = ref(false);
-const filterError = ref<string | null>(null);
-const activitiesCount = ref<number | null>(null);
-const activitiesGeoJSON = ref<any>(null);
-
-const handleFileChange = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  if (target.files && target.files.length > 0) {
-    selectedFile.value = target.files[0];
-    uploadError.value = null;
-    uploadSuccess.value = false;
-  }
-};
-
-const handleDrop = (event: DragEvent) => {
-  isDraggingFile.value = false;
-  if (event.dataTransfer && event.dataTransfer.files.length > 0) {
-    const file = event.dataTransfer.files[0];
-    if (file.name.endsWith(".zip")) {
-      selectedFile.value = file;
-      uploadError.value = null;
-      uploadSuccess.value = false;
-    } else {
-      uploadError.value = "Please select a .zip archive.";
-    }
-  }
-};
-
-const formatSize = (bytes: number) => {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-};
-
-const submitZip = async () => {
-  if (!selectedFile.value) return;
-  isUploading.value = true;
-  uploadError.value = null;
-  uploadSuccess.value = false;
-  totalCount.value = null;
-  parsedCount.value = null;
-  rideCount.value = null;
-
-  try {
-    const formData = new FormData();
-    formData.append("file", selectedFile.value);
-
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `Server returned status ${res.status}`);
-    }
-
-    const data = (await res.json()) as {
-      sessionId: string;
-      total: number;
-      parsed: number;
-      rideCount: number;
-    };
-    sessionId.value = data.sessionId;
-    totalCount.value = data.total;
-    parsedCount.value = data.parsed;
-    rideCount.value = data.rideCount;
-    uploadSuccess.value = true;
-  } catch (err: any) {
-    console.error(err);
-    uploadError.value = err.message || "An error occurred during upload.";
-  } finally {
-    isUploading.value = false;
-  }
-};
-
-const filterActivities = async () => {
-  if (!sessionId.value) return;
-  isFiltering.value = true;
-  filterError.value = null;
-  activitiesCount.value = null;
-  activitiesGeoJSON.value = null;
-
-  try {
-    const res = await fetch("/api/filter", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        sessionId: sessionId.value,
-        bbox: bbox.value,
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || `Server returned status ${res.status}`);
-    }
-
-    const geoJSON = await res.json();
-    activitiesGeoJSON.value = geoJSON;
-    activitiesCount.value = geoJSON.features ? geoJSON.features.length : 0;
-  } catch (err: any) {
-    console.error(err);
-    filterError.value = err.message || "An error occurred while filtering activities.";
-  } finally {
-    isFiltering.value = false;
-  }
-};
-
-watch(currentStep, (newStep) => {
-  if (newStep === 4) {
-    filterActivities();
-  }
-});
-
-const resetFlow = () => {
-  currentStep.value = 0;
-  selectedFile.value = null;
-  uploadSuccess.value = false;
-  sessionId.value = null;
-  totalCount.value = null;
-  parsedCount.value = null;
-  rideCount.value = null;
-  activitiesCount.value = null;
-  activitiesGeoJSON.value = null;
-  uploadError.value = null;
-  filterError.value = null;
-};
 </script>
 
 <template>
   <div class="app-layout">
     <header class="app-header">
       <div class="header-main">
-        <div class="logo">🐝</div>
+        <div class="logo">🗺️</div>
         <div>
-          <h1>Bumblebee Bike</h1>
-          <p class="tagline">Create a bumblebee map using the bulk export of your Strava data!</p>
+          <h1>Map Tools</h1>
+          <p class="tagline">Build ride maps from Strava bulk exports.</p>
         </div>
       </div>
-      <div class="api-badge" :class="health">
-        API status: <code>{{ health ?? "…" }}</code>
+
+      <div class="header-side">
+        <button v-if="activeTool !== 'home'" class="btn btn-secondary" @click="activeTool = 'home'">
+          All Tools
+        </button>
+        <div class="api-badge" :class="health">API status: <code>{{ health ?? "…" }}</code></div>
       </div>
     </header>
 
     <main class="app-content">
-      <!-- Status Stepper (if currentStep > 0) -->
-      <div v-if="currentStep > 0" class="stepper">
-        <div
-          v-for="step in steps"
-          :key="step.number"
-          class="step-item"
-          :class="{
-            active: currentStep === step.number,
-            completed: currentStep > step.number,
-          }"
-        >
-          <div class="step-circle">{{ step.number }}</div>
-          <span class="step-label">{{ step.label }}</span>
-        </div>
-      </div>
-
-      <!-- Step 0: Homepage -->
-      <div v-if="currentStep === 0" class="card hero-card text-center">
-        <h2>Welcome to Bumblebee Bike!</h2>
-        <p class="lead-text">
-          Create a beautiful, custom map of all your cycling activities using a bulk export of your
-          Strava data.
-        </p>
-        <div class="start-actions">
-          <button @click="currentStep = 1" class="btn btn-primary btn-large">Begin</button>
-        </div>
-      </div>
-
-      <!-- Step 1: Download Bulk Data -->
-      <div v-else-if="currentStep === 1" class="card flow-card">
-        <h2>Step 1: Download Bulk Data from Strava</h2>
-        <div class="step-instructions">
-          <p>
-            To create your bumblebee map, you need to request a bulk export of your account data
-            from Strava. Follow these steps:
-          </p>
-          <ol>
-            <li>
-              Log into
-              <a href="https://www.strava.com" target="_blank" class="link">Strava.com</a> on your
-              computer.
-            </li>
-            <li>
-              Go to your settings page (hover over your profile picture →
-              <strong>Settings</strong>).
-            </li>
-            <li>Select <strong>My Account</strong> from the menu on the left.</li>
-            <li>
-              Scroll down to <strong>Download or Delete Your Account</strong> and click
-              <strong>Get Started</strong>.
-            </li>
-            <li>
-              Click <strong>Request Your Archive</strong> (make sure not to request account
-              deletion!).
-            </li>
-            <li>
-              Strava will email you a link to download your ZIP file, which may take a few minutes
-              or hours depending on account size.
-            </li>
-          </ol>
-          <p>
-            For more detailed information, see the official
-            <a
-              href="https://support.strava.com/en-us/articles/15401919-exporting-your-data-and-bulk-export"
-              target="_blank"
-              class="link"
-              >Strava Bulk Export Guide</a
-            >.
-          </p>
-        </div>
-        <div class="card-actions">
-          <button @click="currentStep = 0" class="btn btn-secondary">Back</button>
-          <button @click="currentStep = 2" class="btn btn-primary">Next</button>
-        </div>
-      </div>
-
-      <!-- Step 2: Upload ZIP -->
-      <div v-else-if="currentStep === 2" class="card flow-card">
-        <h2>Step 2: Upload bulk export ZIP</h2>
-        <p>
-          Select the downloaded Strava export <code>.zip</code> archive file to parse it into a
-          GeoParquet file.
-        </p>
-
-        <div
-          class="upload-zone"
-          :class="{ dragging: isDraggingFile }"
-          @dragover.prevent="isDraggingFile = true"
-          @dragleave.prevent="isDraggingFile = false"
-          @drop.prevent="handleDrop"
-        >
-          <input
-            type="file"
-            id="zip-upload"
-            accept=".zip"
-            @change="handleFileChange"
-            class="file-input"
-          />
-          <label for="zip-upload" class="upload-label">
-            <span class="upload-icon">📦</span>
-            <span v-if="selectedFile" class="file-name"
-              >{{ selectedFile.name }} ({{ formatSize(selectedFile.size) }})</span
-            >
-            <span v-else>Click to choose file or drag it here</span>
-          </label>
-        </div>
-
-        <div v-if="uploadError" class="error-banner">⚠️ {{ uploadError }}</div>
-
-        <div v-if="isUploading" class="progress-container">
-          <div class="progress-spinner"></div>
-          <span
-            >Processing zip archive, parsing activities, and writing GeoParquet... This may take a
-            moment.</span
-          >
-        </div>
-
-        <div v-if="uploadSuccess" class="success-banner">
-          <div>✅ File successfully parsed into GeoParquet! Ready to continue.</div>
-          <div style="margin-top: 8px; font-weight: 500">
-            Succesfully parsed {{ parsedCount }} / {{ totalCount }} activities. {{ rideCount }} are
-            type = Ride.
-          </div>
-        </div>
-
-        <div class="card-actions">
-          <button @click="currentStep = 1" class="btn btn-secondary" :disabled="isUploading">
-            Back
-          </button>
-          <button
-            @click="submitZip"
-            class="btn btn-primary"
-            :disabled="!selectedFile || isUploading || uploadSuccess"
-          >
-            Submit
-          </button>
-          <button @click="currentStep = 3" class="btn btn-primary" :disabled="!uploadSuccess">
-            Next
-          </button>
-        </div>
-      </div>
-
-      <!-- Step 3: Select Area -->
-      <div v-else-if="currentStep === 3" class="card-group">
-        <div class="card flow-card">
-          <h2>Step 3: Select Bounding Box</h2>
-          <p>
-            Search for a city and adjust the bounding box corners to frame the area of interest.
-          </p>
-
-          <div class="control-panel">
-            <label class="control-label">Search for a City</label>
-            <SearchCity @select-city="handleSelectCity" />
-          </div>
-
-          <div class="city-box">
-            <h4>📍 Current Area</h4>
-            <div class="city-name">{{ cityName }}</div>
-            <BBoxCoords :bbox="bbox" />
-          </div>
-
-          <div class="card-actions mt-auto">
-            <button @click="currentStep = 2" class="btn btn-secondary">Back</button>
-            <button @click="currentStep = 4" class="btn btn-primary">Next</button>
-          </div>
-        </div>
-
-        <div class="map-container-wrapper">
-          <MapView v-model:bbox="bbox" :center="center" :showBBox="true" />
-        </div>
-      </div>
-
-      <!-- Step 4: Filter Activities (Process) -->
-      <div v-else-if="currentStep === 4" class="card flow-card text-center">
-        <h2>Step 4: Identifying Cycling Activities</h2>
-        <p>
-          Filtering activities from your GeoParquet file that intersect with the bounding box,
-          restricting to cycling rides only.
-        </p>
-
-        <div v-if="isFiltering" class="processing-indicator">
-          <div class="processing-ring"></div>
-          <h3>Filtering with DuckDB Spatial Extension...</h3>
-          <p>Running: <code>ST_Intersects(geometry, ST_MakeEnvelope(...))</code></p>
-        </div>
-
-        <div v-else-if="filterError" class="error-banner">
-          ⚠️ {{ filterError }}
-          <div class="mt-4">
-            <button @click="filterActivities" class="btn btn-primary">Retry</button>
-          </div>
-        </div>
-
-        <div v-else-if="activitiesCount !== null" class="success-banner">
-          <h3>✅ Query complete!</h3>
-          <p class="lead-text">
-            Found <strong>{{ activitiesCount }}</strong> ride activities inside the bounding box.
-          </p>
-        </div>
-
-        <div class="card-actions">
-          <button @click="currentStep = 3" class="btn btn-secondary" :disabled="isFiltering">
-            Back
-          </button>
-          <button
-            @click="currentStep = 5"
-            class="btn btn-primary"
-            :disabled="activitiesCount === null || isFiltering"
-          >
-            Next
-          </button>
-        </div>
-      </div>
-
-      <!-- Step 5: Show Map -->
-      <div v-else-if="currentStep === 5" class="card-group">
-        <div class="card flow-card final-card">
-          <h2>Your Bumblebee Map 🐝</h2>
-          <p>
-            Showing all <strong>{{ activitiesCount }}</strong> rides intersecting the bounding box
-            in bright orange on a dark background.
-          </p>
-
-          <div class="export-summary">
-            <h4>Location:</h4>
-            <p>{{ cityName }}</p>
-            <h4>Bounding Box:</h4>
-            <code class="block"
-              >{{ bbox[0].toFixed(4) }}, {{ bbox[1].toFixed(4) }}, {{ bbox[2].toFixed(4) }},
-              {{ bbox[3].toFixed(4) }}</code
-            >
-          </div>
-
-          <div class="card-actions mt-auto">
-            <button @click="currentStep = 4" class="btn btn-secondary">Back</button>
-            <button @click="resetFlow" class="btn btn-secondary">Start Over</button>
-          </div>
-        </div>
-
-        <div class="map-container-wrapper">
-          <MapView
-            v-model:bbox="bbox"
-            :center="center"
-            :activitiesGeoJSON="activitiesGeoJSON"
-            :showBBox="false"
-          />
-        </div>
-      </div>
+      <FunctionHome v-if="activeTool === 'home'" @select-tool="activeTool = $event" />
+      <LightningMapFlow v-else-if="activeTool === 'lightning-map'" />
+      <CompareFlow v-else />
     </main>
   </div>
 </template>
+
 <style>
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+:root {
+  color-scheme: dark;
 }
 
 body {
@@ -481,6 +75,13 @@ body {
   min-height: 100vh;
 }
 
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
 code {
   background: #1e1e1e;
   padding: 0.15em 0.4em;
@@ -490,10 +91,10 @@ code {
 }
 
 .app-layout {
-  max-width: 1100px;
+  max-width: 1240px;
   width: 100%;
   margin: 0 auto;
-  padding: 24px 16px;
+  padding: 24px 16px 40px;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -515,20 +116,27 @@ code {
   gap: 16px;
 }
 
+.header-side {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .logo {
-  font-size: 2.5rem;
+  font-size: 2.25rem;
 }
 
 .app-header h1 {
-  font-size: 1.8rem;
-  margin: 0 0 4px 0;
+  font-size: 1.9rem;
+  margin: 0 0 4px;
   font-weight: 700;
   color: #fff;
 }
 
 .tagline {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 0.98rem;
   color: #a0a0a0;
 }
 
@@ -569,7 +177,6 @@ code {
   color: #ff9900;
 }
 
-/* Stepper Styles */
 .stepper {
   display: flex;
   justify-content: space-between;
@@ -577,10 +184,10 @@ code {
   border: 1px solid #2d2d2d;
   padding: 16px 24px;
   border-radius: 12px;
-  margin-bottom: 8px;
   gap: 8px;
   flex-wrap: wrap;
 }
+
 .step-item {
   display: flex;
   align-items: center;
@@ -588,14 +195,17 @@ code {
   opacity: 0.4;
   transition: opacity 0.2s;
 }
+
 .step-item.active {
   opacity: 1;
   color: #ff9900;
 }
+
 .step-item.completed {
   opacity: 0.8;
   color: #44bb44;
 }
+
 .step-circle {
   width: 24px;
   height: 24px;
@@ -606,30 +216,33 @@ code {
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  font-weight: bold;
+  font-weight: 700;
 }
+
 .step-item.active .step-circle {
   background: #ff9900;
   color: #000;
 }
+
 .step-item.completed .step-circle {
   background: #44bb44;
   color: #000;
 }
+
 .step-label {
   font-size: 13px;
   font-weight: 600;
 }
+
 @media (max-width: 600px) {
   .step-label {
     display: none;
   }
 }
 
-/* Button Styles */
 .btn {
   padding: 10px 20px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -642,32 +255,32 @@ code {
   align-items: center;
   justify-content: center;
 }
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
 .btn-primary {
   background: #ff9900;
   color: #000;
 }
+
 .btn-primary:hover:not(:disabled) {
   background: #ffaa33;
 }
+
 .btn-secondary {
   background: #2a2a2a;
   color: #fff;
   border: 1px solid #444;
 }
+
 .btn-secondary:hover:not(:disabled) {
   background: #3a3a3a;
   border-color: #555;
 }
-.btn-large {
-  padding: 14px 28px;
-  font-size: 16px;
-}
 
-/* Card Styles */
 .card {
   background: #1a1a1a;
   border: 1px solid #2d2d2d;
@@ -675,12 +288,14 @@ code {
   padding: 24px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
+
 .card h2 {
   margin-top: 0;
   margin-bottom: 12px;
   font-size: 1.5rem;
   color: #fff;
 }
+
 .card p {
   margin-top: 0;
   color: #b0b0b0;
@@ -693,47 +308,51 @@ code {
   gap: 20px;
   min-height: 550px;
 }
-@media (max-width: 900px) {
+
+@media (max-width: 980px) {
   .card-group {
     grid-template-columns: 1fr;
   }
 }
+
 .map-container-wrapper {
   width: 100%;
   height: 550px;
 }
+
 .card-actions {
   display: flex;
   gap: 12px;
   margin-top: 24px;
+  flex-wrap: wrap;
 }
+
 .mt-auto {
   margin-top: auto;
 }
+
+.mt-4 {
+  margin-top: 16px;
+}
+
 .text-center {
   text-align: center;
 }
+
 .hero-card {
-  padding: 60px 40px;
+  padding: 36px;
 }
-.hero-card h2 {
-  font-size: 2.2rem;
-  margin-bottom: 16px;
-  color: #fff;
-}
+
 .lead-text {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   color: #aaa;
-  max-width: 600px;
-  margin: 0 auto 30px auto;
   line-height: 1.6;
 }
 
-/* Upload Zone */
 .upload-zone {
   border: 2px dashed #444;
   border-radius: 8px;
-  padding: 50px 20px;
+  padding: 40px 20px;
   text-align: center;
   cursor: pointer;
   background: #1e1e1e;
@@ -741,13 +360,14 @@ code {
     border-color 0.15s,
     background 0.15s;
   position: relative;
-  margin-top: 16px;
 }
+
 .upload-zone:hover,
 .upload-zone.dragging {
   border-color: #ff9900;
   background: #222;
 }
+
 .file-input {
   position: absolute;
   inset: 0;
@@ -755,6 +375,7 @@ code {
   cursor: pointer;
   width: 100%;
 }
+
 .upload-label {
   display: flex;
   flex-direction: column;
@@ -764,40 +385,40 @@ code {
   font-size: 14px;
   cursor: pointer;
 }
+
 .upload-icon {
   font-size: 32px;
 }
+
 .file-name {
   color: #ff9900;
   font-weight: 600;
 }
 
-/* Status / Banner Styles */
 .error-banner {
   background: rgba(220, 50, 50, 0.15);
   border: 1px solid #d32f2f;
   color: #ef5350;
   padding: 12px 16px;
   border-radius: 6px;
-  margin-top: 16px;
   font-size: 14px;
   text-align: left;
 }
+
 .success-banner {
   background: rgba(50, 200, 50, 0.1);
   border: 1px solid #388e3c;
   color: #81c784;
   padding: 16px;
   border-radius: 8px;
-  margin-top: 16px;
   font-size: 14px;
   text-align: left;
 }
+
 .progress-container {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-top: 16px;
   background: #1a1a1a;
   border: 1px solid #333;
   padding: 16px;
@@ -805,6 +426,7 @@ code {
   color: #aaa;
   font-size: 13px;
 }
+
 .progress-spinner {
   width: 20px;
   height: 20px;
@@ -824,13 +446,13 @@ code {
   }
 }
 
-/* Processing indicator (duckdb) */
 .processing-indicator {
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 40px 20px;
 }
+
 .processing-ring {
   width: 60px;
   height: 60px;
@@ -846,17 +468,21 @@ code {
   line-height: 1.6;
   color: #b0b0b0;
 }
-.step-instructions li {
-  margin-bottom: 8px;
+
+.step-instructions li + li {
+  margin-top: 8px;
 }
+
 .link {
   color: #ff9900;
   text-decoration: none;
   font-weight: 600;
 }
+
 .link:hover {
   text-decoration: underline;
 }
+
 .city-box {
   background: #242424;
   border: 1px solid #333;
@@ -864,34 +490,40 @@ code {
   border-radius: 6px;
   margin-top: 20px;
 }
+
 .city-box h4 {
-  margin: 0 0 6px 0;
+  margin: 0 0 6px;
   color: #888;
   font-size: 11px;
   text-transform: uppercase;
 }
+
 .city-name {
   font-size: 16px;
   font-weight: 600;
   color: #fff;
 }
+
 .export-summary {
   margin: 20px 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
 .export-summary h4 {
   margin: 0;
   color: #888;
   font-size: 11px;
   text-transform: uppercase;
 }
+
 .export-summary p {
   margin: 0;
   color: #fff;
   font-size: 15px;
 }
+
 .block {
   display: block;
   font-family: monospace;
@@ -899,10 +531,8 @@ code {
   padding: 8px 12px;
   border-radius: 4px;
 }
-.flow-card {
-  display: flex;
-  flex-direction: column;
-}
+
+.flow-card,
 .final-card {
   display: flex;
   flex-direction: column;

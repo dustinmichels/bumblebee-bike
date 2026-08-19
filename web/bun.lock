@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "bumblebee-bike",
+      "name": "map-tools",
       "dependencies": {
         "lucide-vue-next": "^1.0.0",
         "maplibre-gl": "^6.4.1",

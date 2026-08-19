@@ -1,94 +1,31 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onMounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, ref } from "vue";
+import {
+  EMPTY_FEATURE_COLLECTION,
+  bboxCenter,
+  getFeatureCollectionBounds,
+  type BBox,
+  type GeoJSONFeatureCollection,
+  type LngLat,
+  type RouteLayer,
+} from "../lib/activity";
 
 const MapView = defineAsyncComponent(() => import("./MapView.vue"));
 
-type Geometry =
-  | { type: "LineString"; coordinates: [number, number][] }
-  | { type: "MultiLineString"; coordinates: [number, number][][] }
-  | { type: "Point"; coordinates: [number, number] }
-  | { type: "MultiPoint"; coordinates: [number, number][] }
-  | { type: string; coordinates?: unknown };
-
-type GeoJSONFeature = {
-  geometry?: Geometry | null;
-  properties?: Record<string, unknown>;
-};
-
-type GeoJSONFeatureCollection = {
-  type: "FeatureCollection";
-  features: GeoJSONFeature[];
-};
-
-const bbox = ref<[number, number, number, number]>([-71.1912, 42.2279, -70.9227, 42.3969]);
-const center = ref<[number, number]>([-71.0589, 42.3601]);
-const activitiesGeoJSON = ref<GeoJSONFeatureCollection | null>(null);
+const bbox = ref<BBox>([-71.1912, 42.2279, -70.9227, 42.3969]);
+const center = ref<LngLat>([-71.0589, 42.3601]);
+const activitiesGeoJSON = ref<GeoJSONFeatureCollection>(EMPTY_FEATURE_COLLECTION);
 const activityCount = ref<number | null>(null);
 const isLoading = ref(true);
 const loadError = ref<string | null>(null);
-
-const includeCoordinate = (
-  coords: [number, number],
-  bounds: { minLng: number; minLat: number; maxLng: number; maxLat: number },
-) => {
-  bounds.minLng = Math.min(bounds.minLng, coords[0]);
-  bounds.minLat = Math.min(bounds.minLat, coords[1]);
-  bounds.maxLng = Math.max(bounds.maxLng, coords[0]);
-  bounds.maxLat = Math.max(bounds.maxLat, coords[1]);
-};
-
-const updateViewport = (geoJSON: GeoJSONFeatureCollection) => {
-  const bounds = {
-    minLng: Number.POSITIVE_INFINITY,
-    minLat: Number.POSITIVE_INFINITY,
-    maxLng: Number.NEGATIVE_INFINITY,
-    maxLat: Number.NEGATIVE_INFINITY,
-  };
-
-  for (const feature of geoJSON.features) {
-    const geometry = feature.geometry;
-    if (!geometry) {
-      continue;
-    }
-
-    if (geometry.type === "LineString") {
-      for (const coords of geometry.coordinates) {
-        includeCoordinate(coords, bounds);
-      }
-      continue;
-    }
-
-    if (geometry.type === "MultiLineString") {
-      for (const line of geometry.coordinates) {
-        for (const coords of line) {
-          includeCoordinate(coords, bounds);
-        }
-      }
-      continue;
-    }
-
-    if (geometry.type === "Point") {
-      includeCoordinate(geometry.coordinates, bounds);
-      continue;
-    }
-
-    if (geometry.type === "MultiPoint") {
-      for (const coords of geometry.coordinates) {
-        includeCoordinate(coords, bounds);
-      }
-    }
-  }
-
-  if (!Number.isFinite(bounds.minLng)) {
-    return;
-  }
-
-  bbox.value = [bounds.minLng, bounds.minLat, bounds.maxLng, bounds.maxLat];
-  center.value = [
-    (bounds.minLng + bounds.maxLng) / 2,
-    (bounds.minLat + bounds.maxLat) / 2,
-  ];
-};
+const previewRoute = computed<RouteLayer[]>(() => [
+  {
+    id: "map-test",
+    label: "Preview",
+    color: "#ff8c00",
+    data: activitiesGeoJSON.value,
+  },
+]);
 
 const loadMap = async () => {
   isLoading.value = true;
@@ -104,10 +41,15 @@ const loadMap = async () => {
     const geoJSON = (await res.json()) as GeoJSONFeatureCollection;
     activitiesGeoJSON.value = geoJSON;
     activityCount.value = geoJSON.features.length;
-    updateViewport(geoJSON);
-  } catch (err: any) {
-    console.error(err);
-    loadError.value = err.message || "Unable to load map test data.";
+
+    const bounds = getFeatureCollectionBounds(geoJSON);
+    if (bounds) {
+      bbox.value = bounds;
+      center.value = bboxCenter(bounds);
+    }
+  } catch (error) {
+    console.error(error);
+    loadError.value = error instanceof Error ? error.message : "Unable to load map test data.";
   } finally {
     isLoading.value = false;
   }
@@ -122,7 +64,7 @@ onMounted(() => {
   <div class="map-test-layout">
     <header class="map-test-header">
       <strong>Map Test</strong>
-      <a href="/" class="back-link">← Back to app</a>
+      <a href="/" class="back-link">← Back to map tools</a>
     </header>
 
     <div class="card-group">
@@ -130,7 +72,7 @@ onMounted(() => {
         <h2>Direct dataset preview</h2>
         <p>
           Loads <code>data/activities.parquet</code> directly and renders every activity geometry as
-          map points.
+          map routes.
         </p>
 
         <div v-if="isLoading" class="status-card">
@@ -154,17 +96,7 @@ onMounted(() => {
       </div>
 
       <div class="map-container-wrapper">
-        <MapView
-          v-if="activitiesGeoJSON"
-          v-model:bbox="bbox"
-          :center="center"
-          :activitiesGeoJSON="activitiesGeoJSON"
-          :showBBox="false"
-        />
-        <div v-else class="map-placeholder">
-          <span v-if="isLoading">Preparing preview…</span>
-          <span v-else>Map preview unavailable.</span>
-        </div>
+        <MapView v-model:bbox="bbox" :center="center" :routes="previewRoute" :show-b-box="false" />
       </div>
     </div>
   </div>
@@ -261,9 +193,6 @@ onMounted(() => {
 .summary-code {
   display: block;
   font-family: monospace;
-  background: #111;
-  padding: 8px 12px;
-  border-radius: 4px;
   color: #ff9900;
 }
 
@@ -274,22 +203,11 @@ onMounted(() => {
   padding: 12px 16px;
   border-radius: 6px;
   font-size: 14px;
+  text-align: left;
 }
 
 .map-container-wrapper {
   min-height: 550px;
-}
-
-.map-placeholder {
-  width: 100%;
-  height: 550px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  border: 1px solid #2d2d2d;
-  background: #1a1a1a;
-  color: #888;
 }
 
 @media (max-width: 900px) {
