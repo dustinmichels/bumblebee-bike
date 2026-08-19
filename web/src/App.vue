@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import CompareFlow from "./components/flows/CompareFlow.vue";
-import LightningMapFlow from "./components/flows/LightningMapFlow.vue";
-import FunctionHome from "./components/home/FunctionHome.vue";
+import { onMounted, ref, computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
-type ToolKey = "home" | "lightning-map" | "compare";
+const route = useRoute();
+const router = useRouter();
 
-const activeTool = ref<ToolKey>("home");
+const activeTool = computed(() => {
+  if (route.path === "/lightning-map") return "lightning-map";
+  if (route.path === "/compare") return "compare";
+  return "home";
+});
 const health = ref<string | null>(null);
 
 onMounted(async () => {
@@ -18,10 +21,17 @@ onMounted(async () => {
     health.value = "unreachable";
   }
 });
+
+const onSelectTool = (tool: string) => {
+  router.push(`/${tool}`);
+};
 </script>
 
 <template>
-  <div class="app-layout">
+  <div v-if="route.path === '/map-test'" class="map-test-wrapper">
+    <router-view />
+  </div>
+  <div v-else class="app-layout">
     <header class="app-header">
       <div class="header-main">
         <div class="logo">🗺️</div>
@@ -32,7 +42,7 @@ onMounted(async () => {
       </div>
 
       <div class="header-side">
-        <button v-if="activeTool !== 'home'" class="btn btn-secondary" @click="activeTool = 'home'">
+        <button v-if="activeTool !== 'home'" class="btn btn-secondary" @click="router.push('/')">
           All Tools
         </button>
         <div class="api-badge" :class="health">API status: <code>{{ health ?? "…" }}</code></div>
@@ -40,9 +50,7 @@ onMounted(async () => {
     </header>
 
     <main class="app-content">
-      <FunctionHome v-if="activeTool === 'home'" @select-tool="activeTool = $event" />
-      <LightningMapFlow v-else-if="activeTool === 'lightning-map'" />
-      <CompareFlow v-else />
+      <router-view @select-tool="onSelectTool" />
     </main>
   </div>
 </template>

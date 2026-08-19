@@ -64,7 +64,7 @@ onMounted(() => {
   <div class="map-test-layout">
     <header class="map-test-header">
       <strong>Map Test</strong>
-      <a href="/" class="back-link">← Back to map tools</a>
+      <router-link to="/" class="back-link">← Back to map tools</router-link>
     </header>
 
     <div class="card-group">
