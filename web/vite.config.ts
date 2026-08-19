@@ -4,10 +4,12 @@ import vue from '@vitejs/plugin-vue'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  optimizeDeps: {
+    exclude: ['maplibre-gl'],
+  },
   server: {
     port: 5173,
     proxy: {
-      // Proxy /api/* to the Go server during development.
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,

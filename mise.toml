@@ -1,6 +1,7 @@
 [tools]
 bun = "latest"
 go = "latest"
+air = "latest"
 
 [tasks.build]
 description = "Compile frontend then embed into Go binary"

@@ -1,10 +1,14 @@
+# Data
+data/strava_export**
+data/**
+
 # Build output
 bin/
 web/node_modules/
 web/dist/*
 !web/dist/.gitkeep
+tmp/
 
-data/strava_export**
 
 # Created by https://www.toptal.com/developers/gitignore/api/go,macos
 # Edit at https://www.toptal.com/developers/gitignore?templates=go,macos
