@@ -1,0 +1,51 @@
+[tools]
+bun = "latest"
+go = "latest"
+
+[tasks.build]
+description = "Compile frontend then embed into Go binary"
+depends = ["web-build"]
+run = "go build -o bin/bumblebee-bike ."
+
+[tasks.web-build]
+description = "Build the Vue frontend"
+run = [
+  "cd web && bun run build",
+  "touch web/dist/.gitkeep",
+]
+
+[tasks.run]
+description = "Build and run the compiled binary"
+depends = ["build"]
+run = "./bin/bumblebee-bike"
+
+[tasks.dev-backend]
+description = "Start the Go server with live reload (requires air)"
+run = "air"
+
+[tasks.dev-frontend]
+description = "Start the Vite dev server (proxies /api → :8080)"
+run = "cd web && bun run dev"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = [
+  "rm -rf bin/bumblebee-bike web/dist/*",
+  "touch web/dist/.gitkeep",
+]
+
+[tasks.dev]
+description = "Run backend and frontend dev servers concurrently"
+run = """
+trap 'kill 0' SIGINT SIGTERM EXIT
+air &
+cd web && bun run dev
+"""
+
+[tasks.fmt]
+description = "Format all source code (oxfmt + gofmt)"
+run = [
+  "cd web && bunx oxfmt .",
+  "gofmt -w .",
+]
+
