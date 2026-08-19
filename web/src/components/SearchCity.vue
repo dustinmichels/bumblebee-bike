@@ -1,108 +1,111 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch, onUnmounted } from "vue";
 
 interface NominatimResult {
-  place_id: number
-  boundingbox: string[] // [minlat, maxlat, minlon, maxlon]
-  lat: string
-  lon: string
-  display_name: string
+  place_id: number;
+  boundingbox: string[]; // [minlat, maxlat, minlon, maxlon]
+  lat: string;
+  lon: string;
+  display_name: string;
 }
 
 const emit = defineEmits<{
-  (e: 'select-city', payload: {
-    name: string
-    bbox: [number, number, number, number] // [minLng, minLat, maxLng, maxLat]
-    lat: number
-    lon: number
-  }): void
-}>()
+  (
+    e: "select-city",
+    payload: {
+      name: string;
+      bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
+      lat: number;
+      lon: number;
+    },
+  ): void;
+}>();
 
-const query = ref('')
-const suggestions = ref<NominatimResult[]>([])
-const loading = ref(false)
-const showError = ref(false)
-let debounceTimeout: ReturnType<typeof setTimeout> | null = null
-let latestRequestId = 0
+const query = ref("");
+const suggestions = ref<NominatimResult[]>([]);
+const loading = ref(false);
+const showError = ref(false);
+let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
+let latestRequestId = 0;
 
 const searchCities = async (val: string) => {
   if (!val.trim()) {
-    suggestions.value = []
-    return
+    suggestions.value = [];
+    return;
   }
-  const currentRequestId = ++latestRequestId
-  loading.value = true
-  showError.value = false
+  const currentRequestId = ++latestRequestId;
+  loading.value = true;
+  showError.value = false;
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&limit=6`
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&limit=6`;
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'BumblebeeBike-App/1.0'
-      }
-    })
-    if (!res.ok) throw new Error('Search failed')
-    const data = (await res.json()) as NominatimResult[]
-    
+        "User-Agent": "BumblebeeBike-App/1.0",
+      },
+    });
+    if (!res.ok) throw new Error("Search failed");
+    const data = (await res.json()) as NominatimResult[];
+
     if (currentRequestId === latestRequestId) {
-      suggestions.value = data
+      suggestions.value = data;
     }
   } catch (err) {
     if (currentRequestId === latestRequestId) {
-      console.error(err)
-      showError.value = true
+      console.error(err);
+      showError.value = true;
     }
   } finally {
     if (currentRequestId === latestRequestId) {
-      loading.value = false
+      loading.value = false;
     }
   }
-}
+};
 
-let suppressNextWatch = false
+let suppressNextWatch = false;
 
 watch(query, (newVal) => {
-  if (debounceTimeout) clearTimeout(debounceTimeout)
+  if (debounceTimeout) clearTimeout(debounceTimeout);
   if (suppressNextWatch) {
-    suppressNextWatch = false
-    return
+    suppressNextWatch = false;
+    return;
   }
   if (!newVal.trim()) {
-    suggestions.value = []
-    return
+    suggestions.value = [];
+    return;
   }
   debounceTimeout = setTimeout(() => {
-    searchCities(newVal)
-  }, 400)
-})
+    searchCities(newVal);
+  }, 400);
+});
 
 onUnmounted(() => {
-  if (debounceTimeout) clearTimeout(debounceTimeout)
-})
+  if (debounceTimeout) clearTimeout(debounceTimeout);
+});
 
 const selectSuggestion = (item: NominatimResult) => {
-  latestRequestId++ // Invalidate any in-flight fetch requests
-  suppressNextWatch = true
-  query.value = item.display_name
-  suggestions.value = []
-  
-  const minLat = parseFloat(item.boundingbox[0])
-  const maxLat = parseFloat(item.boundingbox[1])
-  const minLng = parseFloat(item.boundingbox[2])
-  const maxLng = parseFloat(item.boundingbox[3])
-  
-  emit('select-city', {
+  latestRequestId++; // Invalidate any in-flight fetch requests
+  suppressNextWatch = true;
+  query.value = item.display_name;
+  suggestions.value = [];
+
+  const minLat = parseFloat(item.boundingbox[0]);
+  const maxLat = parseFloat(item.boundingbox[1]);
+  const minLng = parseFloat(item.boundingbox[2]);
+  const maxLng = parseFloat(item.boundingbox[3]);
+
+  emit("select-city", {
     name: item.display_name,
     bbox: [minLng, minLat, maxLng, maxLat],
     lat: parseFloat(item.lat),
-    lon: parseFloat(item.lon)
-  })
-}
+    lon: parseFloat(item.lon),
+  });
+};
 
 const clearInput = () => {
-  latestRequestId++ // Invalidate any in-flight fetch requests
-  query.value = ''
-  suggestions.value = []
-}
+  latestRequestId++; // Invalidate any in-flight fetch requests
+  query.value = "";
+  suggestions.value = [];
+};
 </script>
 
 <template>
@@ -163,14 +166,18 @@ const clearInput = () => {
   border: 1px solid #333;
   border-radius: 8px;
   color: #fff;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
 .search-input:focus {
   outline: none;
   border-color: #ff9900;
-  box-shadow: 0 0 0 2px rgba(255, 153, 0, 0.2), 0 4px 6px rgba(0, 0, 0, 0.3);
+  box-shadow:
+    0 0 0 2px rgba(255, 153, 0, 0.2),
+    0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
 .input-actions {

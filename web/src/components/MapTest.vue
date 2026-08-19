@@ -1,23 +1,25 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import SearchCity from './SearchCity.vue'
-import MapView from './MapView.vue'
+import { ref, defineAsyncComponent } from "vue";
+import SearchCity from "./SearchCity.vue";
+import BBoxCoords from "./BBoxCoords.vue";
+
+const MapView = defineAsyncComponent(() => import("./MapView.vue"));
 
 // Default: Boston, MA
-const cityName = ref('Boston, MA, USA')
-const bbox = ref<[number, number, number, number]>([-71.1912, 42.2279, -70.9227, 42.3969])
-const center = ref<[number, number]>([-71.0589, 42.3601])
+const cityName = ref("Boston, MA, USA");
+const bbox = ref<[number, number, number, number]>([-71.1912, 42.2279, -70.9227, 42.3969]);
+const center = ref<[number, number]>([-71.0589, 42.3601]);
 
 const handleSelectCity = (payload: {
-  name: string
-  bbox: [number, number, number, number]
-  lat: number
-  lon: number
+  name: string;
+  bbox: [number, number, number, number];
+  lat: number;
+  lon: number;
 }) => {
-  cityName.value = payload.name
-  bbox.value = payload.bbox
-  center.value = [payload.lon, payload.lat]
-}
+  cityName.value = payload.name;
+  bbox.value = payload.bbox;
+  center.value = [payload.lon, payload.lat];
+};
 </script>
 
 <template>
@@ -40,6 +42,7 @@ const handleSelectCity = (payload: {
         <div class="city-box">
           <h4>📍 Current Area</h4>
           <div class="city-name">{{ cityName }}</div>
+          <BBoxCoords :bbox="bbox" />
         </div>
       </div>
 

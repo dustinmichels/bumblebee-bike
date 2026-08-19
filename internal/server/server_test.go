@@ -23,7 +23,7 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", rr.Code)
 	}
 
-	var resp map[string]string
+	var resp map[string]any
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -150,5 +150,27 @@ func TestUploadAndFilter(t *testing.T) {
 		t.Error("expected at least some rides to be returned, got 0")
 	} else {
 		t.Logf("found %d rides matching search criteria", len(features))
+	}
+}
+
+func TestGetURL(t *testing.T) {
+	tests := []struct {
+		addr     string
+		expected string
+	}{
+		{":8080", "http://localhost:8080"},
+		{"localhost:8080", "http://localhost:8080"},
+		{"127.0.0.1:8080", "http://127.0.0.1:8080"},
+		{"0.0.0.0:8080", "http://localhost:8080"},
+		{"[::]:8080", "http://localhost:8080"},
+		{":80", "http://localhost:80"},
+		{"invalid-addr", "http://localhostinvalid-addr"},
+	}
+
+	for _, tt := range tests {
+		actual := getURL(tt.addr)
+		if actual != tt.expected {
+			t.Errorf("getURL(%q) = %q, expected %q", tt.addr, actual, tt.expected)
+		}
 	}
 }

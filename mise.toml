@@ -4,6 +4,9 @@ go = "latest"
 air = "latest"
 duckdb = "latest"
 
+[tasks.setup]
+description = "Install DuckDB spatial extension"
+run = "duckdb -c 'INSTALL spatial;'"
 [tasks.build]
 description = "Compile frontend then embed into Go binary"
 depends = ["web-build"]
@@ -21,10 +24,17 @@ description = "Build and run the compiled binary"
 depends = ["build"]
 run = "./bin/bumblebee-bike"
 
+[tasks.run-test]
+description = "Build and run the compiled binary in test mode"
+depends = ["build"]
+run = "APP_ENV=test ./bin/bumblebee-bike"
 [tasks.dev-backend]
 description = "Start the Go server with live reload (requires air)"
 run = "air"
 
+[tasks.dev-backend-test]
+description = "Start the Go server in test mode with live reload (requires air)"
+run = "APP_ENV=test air"
 [tasks.dev-frontend]
 description = "Start the Vite dev server (proxies /api → :8080)"
 run = "cd web && bun run dev"
@@ -44,6 +54,13 @@ air &
 cd web && bun run dev
 """
 
+[tasks.dev-test]
+description = "Run backend and frontend dev servers concurrently in test mode"
+run = """
+trap 'kill 0' SIGINT SIGTERM EXIT
+APP_ENV=test air &
+cd web && bun run dev
+"""
 [tasks.fmt]
 description = "Format all source code (oxfmt + gofmt)"
 run = [

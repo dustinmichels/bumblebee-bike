@@ -1,23 +1,39 @@
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
+import { defineConfig } from "vite";
+import vue from "@vitejs/plugin-vue";
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [vue()],
   optimizeDeps: {
-    exclude: ['maplibre-gl'],
+    exclude: ["maplibre-gl"],
   },
   server: {
     port: 5173,
     proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
+      "/api": {
+        target: "http://localhost:8080",
         changeOrigin: true,
       },
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: "dist",
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1024,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("maplibre-gl")) {
+              return "maplibre-gl";
+            }
+            if (id.includes("lucide-vue-next")) {
+              return "lucide";
+            }
+            return "vendor";
+          }
+        },
+      },
+    },
   },
-})
+});
