@@ -8,19 +8,25 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 
 setWorkerUrl(maplibreWorkerUrl)
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   bbox: [number, number, number, number] // [minLng, minLat, maxLng, maxLat]
   center: [number, number] // [lng, lat]
-}>()
+  activitiesGeoJSON?: any
+  showBBox?: boolean
+}>(), {
+  activitiesGeoJSON: null,
+  showBBox: true
+})
 
 const emit = defineEmits<{
   (e: 'update:bbox', bbox: [number, number, number, number]): void
 }>()
-
 const mapContainer = ref<HTMLElement | null>(null)
 const map = shallowRef<Map | null>(null)
 const isDragging = ref(false)
 const mapReady = ref(false)
+const mapError = ref<string | null>(null)
+let loadTimeout: any = null
 let markers: {
   sw: Marker
   nw: Marker
@@ -206,8 +212,65 @@ watch(() => props.center, () => {
   }
 }, { deep: true })
 
+watch(() => props.activitiesGeoJSON, (newGeoJSON) => {
+  if (!map.value || !mapReady.value) return
+
+  const source = map.value.getSource('activities-source') as GeoJSONSource | undefined
+  if (source) {
+    if (newGeoJSON) {
+      source.setData(newGeoJSON)
+    } else {
+      source.setData({ type: 'FeatureCollection', features: [] })
+    }
+  } else if (newGeoJSON) {
+    map.value.addSource('activities-source', {
+      type: 'geojson',
+      data: newGeoJSON
+    })
+    map.value.addLayer({
+      id: 'activities-layer',
+      type: 'line',
+      source: 'activities-source',
+      layout: {
+        'line-join': 'round',
+        'line-cap': 'round'
+      },
+      paint: {
+        'line-color': '#ff6600',
+        'line-width': 2.5,
+        'line-opacity': 0.95
+      }
+    })
+  }
+}, { immediate: true })
+
+watch(() => props.showBBox, (newShowBBox) => {
+  if (!map.value || !mapReady.value) return
+
+  const layers = ['bbox-fill', 'bbox-line']
+  for (const layer of layers) {
+    if (map.value.getLayer(layer)) {
+      map.value.setLayoutProperty(layer, 'visibility', newShowBBox ? 'visible' : 'none')
+    }
+  }
+
+  if (markers) {
+    const display = newShowBBox ? 'block' : 'none'
+    markers.sw.getElement().style.display = display
+    markers.nw.getElement().style.display = display
+    markers.ne.getElement().style.display = display
+    markers.se.getElement().style.display = display
+  }
+}, { immediate: true })
 onMounted(() => {
   if (!mapContainer.value) return
+
+  // Setup loading timeout fallback (8 seconds)
+  loadTimeout = setTimeout(() => {
+    if (!mapReady.value && !mapError.value) {
+      mapError.value = 'Map loading timed out. The basemap style or tiles could be blocked by your network, ad-blocker, or firewall.'
+    }
+  }, 8000)
 
   map.value = new Map({
     container: mapContainer.value,
@@ -217,11 +280,26 @@ onMounted(() => {
     attributionControl: false
   })
 
+  // Listen for critical map loading errors
+  map.value.on('error', (e) => {
+    console.error('MapLibre error:', e)
+    if (!mapReady.value) {
+      const msg = e.error?.message || e.message || ''
+      const isTileError = msg.includes('.mvt') || msg.includes('.pbf') || msg.includes('/tiles/') || msg.includes('/vectortiles/')
+      if (!isTileError && (msg.includes('style') || msg.includes('Source') || msg.includes('Failed to fetch'))) {
+        mapError.value = `Failed to load map resources: ${msg || 'Network error'}`
+      }
+    }
+  })
+
   // Add standard navigation controls
   map.value.addControl(new NavigationControl(), 'top-right')
   map.value.addControl(new AttributionControl({ compact: true }), 'bottom-right')
 
   map.value.on('load', () => {
+    if (loadTimeout) {
+      clearTimeout(loadTimeout)
+    }
     if (!map.value) return
     
     // Add bbox layers
@@ -251,6 +329,44 @@ onMounted(() => {
     })
 
     setupMarkers()
+
+    // Apply initial visibility
+    const layers = ['bbox-fill', 'bbox-line']
+    for (const layer of layers) {
+      if (map.value.getLayer(layer)) {
+        map.value.setLayoutProperty(layer, 'visibility', props.showBBox ? 'visible' : 'none')
+      }
+    }
+    if (markers) {
+      const display = props.showBBox ? 'block' : 'none'
+      markers.sw.getElement().style.display = display
+      markers.nw.getElement().style.display = display
+      markers.ne.getElement().style.display = display
+      markers.se.getElement().style.display = display
+    }
+
+    // Apply initial activities
+    if (props.activitiesGeoJSON) {
+      map.value.addSource('activities-source', {
+        type: 'geojson',
+        data: props.activitiesGeoJSON
+      })
+      map.value.addLayer({
+        id: 'activities-layer',
+        type: 'line',
+        source: 'activities-source',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#ff6600',
+          'line-width': 2.5,
+          'line-opacity': 0.95
+        }
+      })
+    }
+
     map.value.resize()
     fitToBBox(0)
     mapReady.value = true
@@ -258,6 +374,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (loadTimeout) {
+    clearTimeout(loadTimeout)
+  }
   if (map.value) {
     map.value.remove()
   }
@@ -268,7 +387,12 @@ onUnmounted(() => {
   <div class="map-wrapper">
     <div ref="mapContainer" class="map-container"></div>
     <Transition name="map-fade">
-      <div v-if="!mapReady" class="map-loading">
+      <div v-if="mapError" class="map-error-overlay">
+        <span class="error-icon">⚠️</span>
+        <span class="error-title">Map Loading Failed</span>
+        <span class="error-msg">{{ mapError }}</span>
+      </div>
+      <div v-else-if="!mapReady" class="map-loading">
         <Loader2 class="spinner" :size="36" />
         <span>Loading map…</span>
       </div>
@@ -309,6 +433,38 @@ onUnmounted(() => {
   color: #888;
   font-size: 13px;
   z-index: 10;
+}
+.map-error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #1a1515;
+  color: #ff9999;
+  font-size: 13px;
+  z-index: 10;
+  padding: 24px;
+  text-align: center;
+}
+
+.error-icon {
+  font-size: 32px;
+  margin-bottom: 4px;
+}
+
+.error-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #ff5555;
+}
+
+.error-msg {
+  color: #b39999;
+  max-width: 400px;
+  line-height: 1.5;
 }
 
 .spinner {

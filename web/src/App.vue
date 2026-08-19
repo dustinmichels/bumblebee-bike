@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import SearchCity from './components/SearchCity.vue'
 import MapView from './components/MapView.vue'
 
@@ -31,37 +31,141 @@ const handleSelectCity = (payload: {
   center.value = [payload.lon, payload.lat]
 }
 
-// Formatting coordinates for output
-const formattedGeoJSON = computed(() => {
-  const [minLng, minLat, maxLng, maxLat] = bbox.value
-  return `[${minLng.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLng.toFixed(6)}, ${maxLat.toFixed(6)}]`
+const currentStep = ref(0)
+const steps = [
+  { number: 1, label: 'Export' },
+  { number: 2, label: 'Upload' },
+  { number: 3, label: 'Area' },
+  { number: 4, label: 'Process' },
+  { number: 5, label: 'Map' }
+]
+
+// Zip Upload state
+const selectedFile = ref<File | null>(null)
+const isDraggingFile = ref(false)
+const isUploading = ref(false)
+const uploadError = ref<string | null>(null)
+const uploadSuccess = ref(false)
+const sessionId = ref<string | null>(null)
+
+// Filtering state
+const isFiltering = ref(false)
+const filterError = ref<string | null>(null)
+const activitiesCount = ref<number | null>(null)
+const activitiesGeoJSON = ref<any>(null)
+
+const handleFileChange = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  if (target.files && target.files.length > 0) {
+    selectedFile.value = target.files[0]
+    uploadError.value = null
+    uploadSuccess.value = false
+  }
+}
+
+const handleDrop = (event: DragEvent) => {
+  isDraggingFile.value = false
+  if (event.dataTransfer && event.dataTransfer.files.length > 0) {
+    const file = event.dataTransfer.files[0]
+    if (file.name.endsWith('.zip')) {
+      selectedFile.value = file
+      uploadError.value = null
+      uploadSuccess.value = false
+    } else {
+      uploadError.value = 'Please select a .zip archive.'
+    }
+  }
+}
+
+const formatSize = (bytes: number) => {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+const submitZip = async () => {
+  if (!selectedFile.value) return
+  isUploading.value = true
+  uploadError.value = null
+  uploadSuccess.value = false
+
+  const formData = new FormData()
+  formData.append('file', selectedFile.value)
+
+  try {
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+    })
+    
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || `Server returned status ${res.status}`)
+    }
+
+    const data = await res.json() as { sessionId: string }
+    sessionId.value = data.sessionId
+    uploadSuccess.value = true
+  } catch (err: any) {
+    console.error(err)
+    uploadError.value = err.message || 'An error occurred during upload.'
+  } finally {
+    isUploading.value = false
+  }
+}
+
+const filterActivities = async () => {
+  if (!sessionId.value) return
+  isFiltering.value = true
+  filterError.value = null
+  activitiesCount.value = null
+  activitiesGeoJSON.value = null
+
+  try {
+    const res = await fetch('/api/filter', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        sessionId: sessionId.value,
+        bbox: bbox.value
+      })
+    })
+
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || `Server returned status ${res.status}`)
+    }
+
+    const geoJSON = await res.json()
+    activitiesGeoJSON.value = geoJSON
+    activitiesCount.value = geoJSON.features ? geoJSON.features.length : 0
+  } catch (err: any) {
+    console.error(err)
+    filterError.value = err.message || 'An error occurred while filtering activities.'
+  } finally {
+    isFiltering.value = false
+  }
+}
+
+watch(currentStep, (newStep) => {
+  if (newStep === 4) {
+    filterActivities()
+  }
 })
 
-const formattedOSM = computed(() => {
-  const [minLng, minLat, maxLng, maxLat] = bbox.value
-  return `${minLat.toFixed(6)},${minLng.toFixed(6)},${maxLat.toFixed(6)},${maxLng.toFixed(6)}`
-})
-
-const formattedCSV = computed(() => {
-  const [minLng, minLat, maxLng, maxLat] = bbox.value
-  return `${minLng.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLng.toFixed(6)}, ${maxLat.toFixed(6)}`
-})
-
-const copyStatus = ref('')
-const activeCopyType = ref('')
-
-const copyToClipboard = (text: string, type: string) => {
-  navigator.clipboard.writeText(text).then(() => {
-    activeCopyType.value = type
-    copyStatus.value = 'Copied!'
-    setTimeout(() => {
-      copyStatus.value = ''
-      activeCopyType.value = ''
-    }, 2000)
-  }).catch((err) => {
-    console.error('Failed to copy: ', err)
-    copyStatus.value = 'Failed to copy'
-  })
+const resetFlow = () => {
+  currentStep.value = 0
+  selectedFile.value = null
+  uploadSuccess.value = false
+  sessionId.value = null
+  activitiesCount.value = null
+  activitiesGeoJSON.value = null
+  uploadError.value = null
+  filterError.value = null
 }
 </script>
 
@@ -72,7 +176,7 @@ const copyToClipboard = (text: string, type: string) => {
         <div class="logo">🐝</div>
         <div>
           <h1>Bumblebee Bike</h1>
-          <p class="tagline">Select a city and drag the bounding box corners to export coordinates.</p>
+          <p class="tagline">Create a bumblebee map using the bulk export of your Strava data!</p>
         </div>
       </div>
       <div class="api-badge" :class="health">
@@ -81,95 +185,208 @@ const copyToClipboard = (text: string, type: string) => {
     </header>
 
     <main class="app-content">
-      <section class="control-panel">
-        <label class="control-label">Search for a City</label>
-        <SearchCity @select-city="handleSelectCity" />
-      </section>
+      <!-- Status Stepper (if currentStep > 0) -->
+      <div v-if="currentStep > 0" class="stepper">
+        <div 
+          v-for="step in steps" 
+          :key="step.number" 
+          class="step-item"
+          :class="{ 
+            active: currentStep === step.number, 
+            completed: currentStep > step.number 
+          }"
+        >
+          <div class="step-circle">{{ step.number }}</div>
+          <span class="step-label">{{ step.label }}</span>
+        </div>
+      </div>
 
-      <section class="map-section">
-        <MapView v-model:bbox="bbox" :center="center" />
-      </section>
+      <!-- Step 0: Homepage -->
+      <div v-if="currentStep === 0" class="card hero-card text-center">
+        <h2>Welcome to Bumblebee Bike!</h2>
+        <p class="lead-text">
+          Create a beautiful, custom map of all your cycling activities using a bulk export of your Strava data.
+        </p>
+        <div class="start-actions">
+          <button @click="currentStep = 1" class="btn btn-primary btn-large">Begin</button>
+        </div>
+      </div>
 
-      <section class="details-section">
-        <div class="card city-info">
-          <h3>📍 Selected Location</h3>
-          <p class="city-name">{{ cityName }}</p>
-          <div class="grid-coords">
-            <div class="coord-box">
-              <span class="coord-label">Min Lng (West)</span>
-              <span class="coord-val">{{ bbox[0].toFixed(6) }}</span>
-            </div>
-            <div class="coord-box">
-              <span class="coord-label">Min Lat (South)</span>
-              <span class="coord-val">{{ bbox[1].toFixed(6) }}</span>
-            </div>
-            <div class="coord-box">
-              <span class="coord-label">Max Lng (East)</span>
-              <span class="coord-val">{{ bbox[2].toFixed(6) }}</span>
-            </div>
-            <div class="coord-box">
-              <span class="coord-label">Max Lat (North)</span>
-              <span class="coord-val">{{ bbox[3].toFixed(6) }}</span>
-            </div>
-          </div>
+      <!-- Step 1: Download Bulk Data -->
+      <div v-else-if="currentStep === 1" class="card flow-card">
+        <h2>Step 1: Download Bulk Data from Strava</h2>
+        <div class="step-instructions">
+          <p>
+            To create your bumblebee map, you need to request a bulk export of your account data from Strava. 
+            Follow these steps:
+          </p>
+          <ol>
+            <li>Log into <a href="https://www.strava.com" target="_blank" class="link">Strava.com</a> on your computer.</li>
+            <li>Go to your settings page (hover over your profile picture → <strong>Settings</strong>).</li>
+            <li>Select <strong>My Account</strong> from the menu on the left.</li>
+            <li>Scroll down to <strong>Download or Delete Your Account</strong> and click <strong>Get Started</strong>.</li>
+            <li>Click <strong>Request Your Archive</strong> (make sure not to request account deletion!).</li>
+            <li>Strava will email you a link to download your ZIP file, which may take a few minutes or hours depending on account size.</li>
+          </ol>
+          <p>For more detailed information, see the official <a href="https://support.strava.com/en-us/articles/15401919-exporting-your-data-and-bulk-export" target="_blank" class="link">Strava Bulk Export Guide</a>.</p>
+        </div>
+        <div class="card-actions">
+          <button @click="currentStep = 0" class="btn btn-secondary">Back</button>
+          <button @click="currentStep = 2" class="btn btn-primary">Next</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Upload ZIP -->
+      <div v-else-if="currentStep === 2" class="card flow-card">
+        <h2>Step 2: Upload bulk export ZIP</h2>
+        <p>Select the downloaded Strava export <code>.zip</code> archive file to parse it into a GeoParquet file.</p>
+        
+        <div 
+          class="upload-zone" 
+          :class="{ dragging: isDraggingFile }"
+          @dragover.prevent="isDraggingFile = true"
+          @dragleave.prevent="isDraggingFile = false"
+          @drop.prevent="handleDrop"
+        >
+          <input 
+            type="file" 
+            id="zip-upload" 
+            accept=".zip" 
+            @change="handleFileChange" 
+            class="file-input"
+          />
+          <label for="zip-upload" class="upload-label">
+            <span class="upload-icon">📦</span>
+            <span v-if="selectedFile" class="file-name">{{ selectedFile.name }} ({{ formatSize(selectedFile.size) }})</span>
+            <span v-else>Click to choose file or drag it here</span>
+          </label>
         </div>
 
-        <div class="card export-formats">
-          <h3>💾 Export Formats</h3>
+        <div v-if="uploadError" class="error-banner">
+          ⚠️ {{ uploadError }}
+        </div>
+
+        <div v-if="isUploading" class="progress-container">
+          <div class="progress-spinner"></div>
+          <span>Processing zip archive, parsing activities, and writing GeoParquet... This may take a moment.</span>
+        </div>
+
+        <div v-if="uploadSuccess" class="success-banner">
+          ✅ File successfully parsed into GeoParquet! Ready to continue.
+        </div>
+
+        <div class="card-actions">
+          <button @click="currentStep = 1" class="btn btn-secondary" :disabled="isUploading">Back</button>
+          <button 
+            @click="submitZip" 
+            class="btn btn-primary" 
+            :disabled="!selectedFile || isUploading || uploadSuccess"
+          >
+            Submit
+          </button>
+          <button 
+            @click="currentStep = 3" 
+            class="btn btn-primary" 
+            :disabled="!uploadSuccess"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 3: Select Area -->
+      <div v-else-if="currentStep === 3" class="card-group">
+        <div class="card flow-card">
+          <h2>Step 3: Select Bounding Box</h2>
+          <p>Search for a city and adjust the bounding box corners to frame the area of interest.</p>
           
-          <div class="format-row">
-            <div class="format-info">
-              <span class="format-name">GeoJSON / Mapbox</span>
-              <span class="format-desc"><code>[minLng, minLat, maxLng, maxLat]</code></span>
-            </div>
-            <div class="format-action">
-              <input readonly :value="formattedGeoJSON" class="format-input" />
-              <button 
-                @click="copyToClipboard(formattedGeoJSON, 'geojson')" 
-                class="copy-btn"
-              >
-                {{ activeCopyType === 'geojson' ? copyStatus : 'Copy' }}
-              </button>
-            </div>
+          <div class="control-panel">
+            <label class="control-label">Search for a City</label>
+            <SearchCity @select-city="handleSelectCity" />
           </div>
 
-          <div class="format-row">
-            <div class="format-info">
-              <span class="format-name">OSM Overpass / Nominatim</span>
-              <span class="format-desc"><code>minLat,minLng,maxLat,maxLng</code></span>
-            </div>
-            <div class="format-action">
-              <input readonly :value="formattedOSM" class="format-input" />
-              <button 
-                @click="copyToClipboard(formattedOSM, 'osm')" 
-                class="copy-btn"
-              >
-                {{ activeCopyType === 'osm' ? copyStatus : 'Copy' }}
-              </button>
-            </div>
+          <div class="city-box">
+            <h4>📍 Current Area</h4>
+            <div class="city-name">{{ cityName }}</div>
           </div>
 
-          <div class="format-row">
-            <div class="format-info">
-              <span class="format-name">Standard CSV</span>
-              <span class="format-desc"><code>minLng, minLat, maxLng, maxLat</code></span>
-            </div>
-            <div class="format-action">
-              <input readonly :value="formattedCSV" class="format-input" />
-              <button 
-                @click="copyToClipboard(formattedCSV, 'csv')" 
-                class="copy-btn"
-              >
-                {{ activeCopyType === 'csv' ? copyStatus : 'Copy' }}
-              </button>
-            </div>
+          <div class="card-actions mt-auto">
+            <button @click="currentStep = 2" class="btn btn-secondary">Back</button>
+            <button @click="currentStep = 4" class="btn btn-primary">Next</button>
           </div>
         </div>
-      </section>
+
+        <div class="map-container-wrapper">
+          <MapView v-model:bbox="bbox" :center="center" :showBBox="true" />
+        </div>
+      </div>
+
+      <!-- Step 4: Filter Activities (Process) -->
+      <div v-else-if="currentStep === 4" class="card flow-card text-center">
+        <h2>Step 4: Identifying Cycling Activities</h2>
+        <p>Filtering activities from your GeoParquet file that intersect with the bounding box, restricting to cycling rides only.</p>
+
+        <div v-if="isFiltering" class="processing-indicator">
+          <div class="processing-ring"></div>
+          <h3>Filtering with DuckDB Spatial Extension...</h3>
+          <p>Running: <code>ST_Intersects(geometry, ST_MakeEnvelope(...))</code></p>
+        </div>
+
+        <div v-else-if="filterError" class="error-banner">
+          ⚠️ {{ filterError }}
+          <div class="mt-4">
+            <button @click="filterActivities" class="btn btn-primary">Retry</button>
+          </div>
+        </div>
+
+        <div v-else-if="activitiesCount !== null" class="success-banner">
+          <h3>✅ Query complete!</h3>
+          <p class="lead-text">Found <strong>{{ activitiesCount }}</strong> ride activities inside the bounding box.</p>
+        </div>
+
+        <div class="card-actions">
+          <button @click="currentStep = 3" class="btn btn-secondary" :disabled="isFiltering">Back</button>
+          <button 
+            @click="currentStep = 5" 
+            class="btn btn-primary" 
+            :disabled="activitiesCount === null || isFiltering"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 5: Show Map -->
+      <div v-else-if="currentStep === 5" class="card-group">
+        <div class="card flow-card final-card">
+          <h2>Your Bumblebee Map 🐝</h2>
+          <p>Showing all <strong>{{ activitiesCount }}</strong> rides intersecting the bounding box in bright orange on a dark background.</p>
+
+          <div class="export-summary">
+            <h4>Location:</h4>
+            <p>{{ cityName }}</p>
+            <h4>Bounding Box:</h4>
+            <code class="block">{{ bbox[0].toFixed(4) }}, {{ bbox[1].toFixed(4) }}, {{ bbox[2].toFixed(4) }}, {{ bbox[3].toFixed(4) }}</code>
+          </div>
+
+          <div class="card-actions mt-auto">
+            <button @click="currentStep = 4" class="btn btn-secondary">Back</button>
+            <button @click="resetFlow" class="btn btn-secondary">Start Over</button>
+          </div>
+        </div>
+
+        <div class="map-container-wrapper">
+          <MapView 
+            v-model:bbox="bbox" 
+            :center="center" 
+            :activitiesGeoJSON="activitiesGeoJSON" 
+            :showBBox="false" 
+          />
+        </div>
+      </div>
     </main>
   </div>
 </template>
-
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -190,7 +407,7 @@ code {
 }
 
 .app-layout {
-  max-width: 1000px;
+  max-width: 1100px;
   width: 100%;
   margin: 0 auto;
   padding: 24px 16px;
@@ -252,7 +469,7 @@ code {
 .app-content {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 
 .control-panel {
@@ -262,149 +479,340 @@ code {
 }
 
 .control-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #ff9900;
 }
 
-.map-section {
-  width: 100%;
+/* Stepper Styles */
+.stepper {
+  display: flex;
+  justify-content: space-between;
+  background: #1a1a1a;
+  border: 1px solid #2d2d2d;
+  padding: 16px 24px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-
-.details-section {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.4;
+  transition: opacity 0.2s;
 }
-
-@media (max-width: 768px) {
-  .details-section {
-    grid-template-columns: 1fr;
+.step-item.active {
+  opacity: 1;
+  color: #ff9900;
+}
+.step-item.completed {
+  opacity: 0.8;
+  color: #44bb44;
+}
+.step-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #333;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: bold;
+}
+.step-item.active .step-circle {
+  background: #ff9900;
+  color: #000;
+}
+.step-item.completed .step-circle {
+  background: #44bb44;
+  color: #000;
+}
+.step-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+@media (max-width: 600px) {
+  .step-label {
+    display: none;
   }
 }
 
+/* Button Styles */
+.btn {
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: #ff9900;
+  color: #000;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #ffaa33;
+}
+.btn-secondary {
+  background: #2a2a2a;
+  color: #fff;
+  border: 1px solid #444;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: #3a3a3a;
+  border-color: #555;
+}
+.btn-large {
+  padding: 14px 28px;
+  font-size: 16px;
+}
+
+/* Card Styles */
 .card {
   background: #1a1a1a;
   border: 1px solid #2d2d2d;
   border-radius: 12px;
-  padding: 20px;
+  padding: 24px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
-
-.card h3 {
+.card h2 {
   margin-top: 0;
-  margin-bottom: 16px;
-  font-size: 15px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: #ff9900;
-  letter-spacing: 0.05em;
-  border-bottom: 1px solid #2d2d2d;
-  padding-bottom: 10px;
+  margin-bottom: 12px;
+  font-size: 1.5rem;
+  color: #fff;
+}
+.card p {
+  margin-top: 0;
+  color: #b0b0b0;
+  line-height: 1.5;
 }
 
+.card-group {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 20px;
+  min-height: 550px;
+}
+@media (max-width: 900px) {
+  .card-group {
+    grid-template-columns: 1fr;
+  }
+}
+.map-container-wrapper {
+  width: 100%;
+  height: 550px;
+}
+.card-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+.mt-auto {
+  margin-top: auto;
+}
+.text-center {
+  text-align: center;
+}
+.hero-card {
+  padding: 60px 40px;
+}
+.hero-card h2 {
+  font-size: 2.2rem;
+  margin-bottom: 16px;
+  color: #fff;
+}
+.lead-text {
+  font-size: 1.15rem;
+  color: #aaa;
+  max-width: 600px;
+  margin: 0 auto 30px auto;
+  line-height: 1.6;
+}
+
+/* Upload Zone */
+.upload-zone {
+  border: 2px dashed #444;
+  border-radius: 8px;
+  padding: 50px 20px;
+  text-align: center;
+  cursor: pointer;
+  background: #1e1e1e;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+  margin-top: 16px;
+}
+.upload-zone:hover, .upload-zone.dragging {
+  border-color: #ff9900;
+  background: #222;
+}
+.file-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+}
+.upload-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #aaa;
+  font-size: 14px;
+  cursor: pointer;
+}
+.upload-icon {
+  font-size: 32px;
+}
+.file-name {
+  color: #ff9900;
+  font-weight: 600;
+}
+
+/* Status / Banner Styles */
+.error-banner {
+  background: rgba(220, 50, 50, 0.15);
+  border: 1px solid #d32f2f;
+  color: #ef5350;
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-top: 16px;
+  font-size: 14px;
+  text-align: left;
+}
+.success-banner {
+  background: rgba(50, 200, 50, 0.1);
+  border: 1px solid #388e3c;
+  color: #81c784;
+  padding: 16px;
+  border-radius: 8px;
+  margin-top: 16px;
+  font-size: 14px;
+  text-align: left;
+}
+.progress-container {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  padding: 16px;
+  border-radius: 8px;
+  color: #aaa;
+  font-size: 13px;
+}
+.progress-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid #333;
+  border-top-color: #ff9900;
+  border-radius: 50%;
+  animation: spin-spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+
+/* Processing indicator (duckdb) */
+.processing-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+}
+.processing-ring {
+  width: 60px;
+  height: 60px;
+  border: 5px solid #2a2a2a;
+  border-top-color: #ff9900;
+  border-radius: 50%;
+  animation: spin-spin 1s linear infinite;
+  margin-bottom: 20px;
+}
+
+.step-instructions ol {
+  padding-left: 20px;
+  line-height: 1.6;
+  color: #b0b0b0;
+}
+.step-instructions li {
+  margin-bottom: 8px;
+}
+.link {
+  color: #ff9900;
+  text-decoration: none;
+  font-weight: 600;
+}
+.link:hover {
+  text-decoration: underline;
+}
+.city-box {
+  background: #242424;
+  border: 1px solid #333;
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-top: 20px;
+}
+.city-box h4 {
+  margin: 0 0 6px 0;
+  color: #888;
+  font-size: 11px;
+  text-transform: uppercase;
+}
 .city-name {
   font-size: 16px;
   font-weight: 600;
-  margin: 0 0 16px 0;
   color: #fff;
 }
-
-.grid-coords {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.coord-box {
-  background: #242424;
-  border-radius: 6px;
-  padding: 10px 12px;
+.export-summary {
+  margin: 20px 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  border: 1px solid #333;
+  gap: 12px;
 }
-
-.coord-label {
-  font-size: 11px;
+.export-summary h4 {
+  margin: 0;
   color: #888;
+  font-size: 11px;
   text-transform: uppercase;
 }
-
-.coord-val {
-  font-family: monospace;
-  font-size: 14px;
+.export-summary p {
+  margin: 0;
   color: #fff;
+  font-size: 15px;
 }
-
-.format-row {
-  margin-bottom: 16px;
-}
-
-.format-row:last-child {
-  margin-bottom: 0;
-}
-
-.format-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.format-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #e0e0e0;
-}
-
-.format-desc code {
-  font-size: 11px;
-  padding: 2px 4px;
-  background: #111;
-}
-
-.format-action {
-  display: flex;
-  gap: 8px;
-}
-
-.format-input {
-  flex-grow: 1;
-  background: #242424;
-  border: 1px solid #333;
-  border-radius: 6px;
-  padding: 8px 12px;
-  color: #aaa;
+.block {
+  display: block;
   font-family: monospace;
-  font-size: 13px;
-  text-overflow: ellipsis;
+  background: #111;
+  padding: 8px 12px;
+  border-radius: 4px;
 }
-
-.format-input:focus {
-  outline: none;
-  border-color: #ff9900;
+.flow-card {
+  display: flex;
+  flex-direction: column;
 }
-
-.copy-btn {
-  background: #ff9900;
-  color: #000;
-  border: none;
-  border-radius: 6px;
-  padding: 8px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-  min-width: 75px;
-  text-align: center;
-}
-
-.copy-btn:hover {
-  background: #ffaa33;
+.final-card {
+  display: flex;
+  flex-direction: column;
 }
 </style>
-

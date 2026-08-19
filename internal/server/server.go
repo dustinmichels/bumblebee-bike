@@ -24,6 +24,7 @@ func New(staticFS fs.FS) *Server {
 	// API — add sub-routers here as the backend grows.
 	r.Mount("/api", apiRouter())
 
+
 	// SPA catch-all: serves static assets, falls back to index.html.
 	r.Handle("/*", spaHandler(staticFS))
 
