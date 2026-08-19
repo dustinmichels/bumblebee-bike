@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type ToolKey = "lightning-map" | "compare";
+type ToolKey = "lightning-map" | "compare" | "upload";
 
 const emit = defineEmits<{
   selectTool: [tool: ToolKey];
@@ -37,6 +37,19 @@ const tools: Array<{
     ],
     action: "Open Compare",
   },
+  {
+    key: "upload",
+    eyebrow: "Local files",
+    title: "Uploads",
+    summary:
+      "Process one or more Strava exports into GeoParquet, then rename, delete, and reuse them later.",
+    bullets: [
+      "Upload multiple ZIP files in one pass",
+      "Browse saved GeoParquet files from your local library",
+      "Reuse existing data without reprocessing",
+    ],
+    action: "Manage Uploads",
+  },
 ];
 </script>
 
@@ -46,8 +59,8 @@ const tools: Array<{
       <span class="hero-kicker">Route workflows</span>
       <h2>Choose a map tool</h2>
       <p class="lead-text home-copy">
-        Map Tools turns Strava bulk exports into focused ride maps. Start with one rider or compare
-        two people on the same area.
+        Map Tools turns Strava bulk exports into focused ride maps. Start with one rider, compare
+        two people, or manage the GeoParquet files you already saved locally.
       </p>
     </div>
 
@@ -105,7 +118,7 @@ const tools: Array<{
 
 .tool-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 20px;
 }
 
@@ -138,11 +151,5 @@ const tools: Array<{
 
 .tool-list li + li {
   margin-top: 8px;
-}
-
-@media (max-width: 900px) {
-  .tool-grid {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

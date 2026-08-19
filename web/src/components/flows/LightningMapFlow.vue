@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onMounted, ref, watch } from "vue";
 import AreaSelectionCard from "./AreaSelectionCard.vue";
 import DatasetUploadCard from "./DatasetUploadCard.vue";
 import FlowStepper from "./FlowStepper.vue";
+import UploadedDatasetList from "../uploads/UploadedDatasetList.vue";
 import { useActivityDataset } from "../../composables/useActivityDataset";
+import { useUploadedDatasets } from "../../composables/useUploadedDatasets";
 import {
   DEFAULT_BOSTON_BBOX,
   DEFAULT_BOSTON_CENTER,
@@ -28,6 +30,7 @@ const cityName = ref("Boston, MA, USA");
 const bbox = ref<BBox>([...DEFAULT_BOSTON_BBOX]);
 const center = ref<LngLat>([...DEFAULT_BOSTON_CENTER]);
 const dataset = useActivityDataset();
+const uploadLibrary = useUploadedDatasets();
 
 const lightningRoutes = computed<RouteLayer[]>(() => [
   {
@@ -44,10 +47,21 @@ const handleSelectCity = (payload: SelectedCity) => {
   center.value = [payload.lon, payload.lat];
 };
 
+const submitSelectedArchive = async () => {
+  const upload = await dataset.submitZip();
+  if (upload) {
+    await uploadLibrary.loadUploads();
+  }
+};
+
 watch(currentStep, (step) => {
   if (step === 4 && dataset.readyToFilter.value) {
     void dataset.filterActivities(bbox.value);
   }
+});
+
+onMounted(() => {
+  void uploadLibrary.loadUploads();
 });
 
 const resetFlow = () => {
@@ -100,8 +114,8 @@ const resetFlow = () => {
 
     <div v-else-if="currentStep === 2" class="flow-layout">
       <DatasetUploadCard
-        title="Step 2: Upload bulk export ZIP"
-        description="Select the downloaded Strava export archive. The server parses the activities into GeoParquet before the map query runs."
+        title="Step 2: Choose a saved upload or process a new ZIP"
+        description="Reuse a GeoParquet file you already processed, or select a new Strava export archive and create one now."
         :selected-file="dataset.selectedFile.value"
         :upload-error="dataset.uploadError.value"
         :is-uploading="dataset.isUploading.value"
@@ -109,14 +123,41 @@ const resetFlow = () => {
         :total-count="dataset.totalCount.value"
         :parsed-count="dataset.parsedCount.value"
         :ride-count="dataset.rideCount.value"
+        :active-dataset-name="dataset.activeDataset.value?.displayName ?? null"
+        :using-existing-dataset="dataset.usingExistingDataset.value"
         @select-file="dataset.setSelectedFile"
-        @upload="dataset.submitZip"
-      />
+        @upload="submitSelectedArchive"
+      >
+        <template #sourceSelection>
+          <UploadedDatasetList
+            v-if="uploadLibrary.uploads.value.length"
+            title="Already uploaded"
+            description="Skip ZIP processing by picking a saved GeoParquet file, or upload a new archive below."
+            :uploads="uploadLibrary.uploads.value"
+            :selected-dataset-id="dataset.activeDataset.value?.datasetId ?? null"
+            :selectable="true"
+            :show-manage-link="true"
+            action-label="Use saved upload"
+            @select="dataset.useExistingDataset"
+          />
+        </template>
+      </DatasetUploadCard>
+      <div v-if="uploadLibrary.error.value" class="error-banner">
+        ⚠️ {{ uploadLibrary.error.value }}
+      </div>
       <div class="card-actions">
-        <button class="btn btn-secondary" :disabled="dataset.isUploading.value" @click="currentStep = 1">
+        <button
+          class="btn btn-secondary"
+          :disabled="dataset.isUploading.value"
+          @click="currentStep = 1"
+        >
           Back
         </button>
-        <button class="btn btn-primary" :disabled="!dataset.uploadSuccess.value" @click="currentStep = 3">
+        <button
+          class="btn btn-primary"
+          :disabled="!dataset.uploadSuccess.value"
+          @click="currentStep = 3"
+        >
           Next
         </button>
       </div>
@@ -154,16 +195,24 @@ const resetFlow = () => {
         </div>
       </div>
 
-      <div v-else-if="dataset.activitiesCount.value !== null" class="success-banner centered-banner">
+      <div
+        v-else-if="dataset.activitiesCount.value !== null"
+        class="success-banner centered-banner"
+      >
         <h3>Routes ready</h3>
         <p class="lead-text compact-lead">
           Found <strong>{{ dataset.activitiesCount.value }}</strong> ride activities in
-          <strong>{{ cityName }}</strong>.
+          <strong>{{ cityName }}</strong
+          >.
         </p>
       </div>
 
       <div class="card-actions">
-        <button class="btn btn-secondary" :disabled="dataset.isFiltering.value" @click="currentStep = 3">
+        <button
+          class="btn btn-secondary"
+          :disabled="dataset.isFiltering.value"
+          @click="currentStep = 3"
+        >
           Back
         </button>
         <button
@@ -201,7 +250,12 @@ const resetFlow = () => {
       </section>
 
       <div class="map-container-wrapper">
-        <MapView v-model:bbox="bbox" :center="center" :show-b-box="false" :routes="lightningRoutes" />
+        <MapView
+          v-model:bbox="bbox"
+          :center="center"
+          :show-b-box="false"
+          :routes="lightningRoutes"
+        />
       </div>
     </div>
   </section>

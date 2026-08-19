@@ -32,11 +32,23 @@ export interface SelectedCity {
   lon: number;
 }
 
+export interface UploadedDataset {
+  datasetId: string;
+  fileName: string;
+  displayName: string;
+  createdAt: string;
+  sizeBytes: number;
+  total?: number | null;
+  parsed?: number | null;
+  rideCount?: number | null;
+}
+
 export interface UploadSummary {
   sessionId: string;
   total: number;
   parsed: number;
   rideCount: number;
+  dataset: UploadedDataset;
 }
 
 export const DEFAULT_BOSTON_BBOX: BBox = [-71.1912, 42.2279, -70.9227, 42.3969];
@@ -116,4 +128,16 @@ export const formatFileSize = (bytes: number) => {
   const sizes = ["Bytes", "KB", "MB", "GB"];
   const index = Math.floor(Math.log(bytes) / Math.log(unit));
   return `${parseFloat((bytes / Math.pow(unit, index)).toFixed(2))} ${sizes[index]}`;
+};
+
+export const formatCreatedAt = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 };

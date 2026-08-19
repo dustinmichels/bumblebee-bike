@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 func TestHealth(t *testing.T) {
@@ -90,16 +91,137 @@ func TestSPAAllowsMapTestInTestMode(t *testing.T) {
 	}
 }
 
+func TestListRenameOpenAndDeleteUploads(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "uploads")
+	t.Setenv("MAPTOOLS_DATA_DIR", dataDir)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	parquetPath := filepath.Join(dataDir, "activities-existing.parquet")
+	if err := os.WriteFile(parquetPath, []byte("parquet"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	total := 12
+	parsed := 11
+	rideCount := 9
+	createdAt := time.Date(2026, time.January, 15, 12, 30, 0, 0, time.UTC)
+	if err := writeUploadMetadata(uploadMetadataPath(parquetPath), uploadMetadata{
+		DatasetID:   "dataset-123",
+		DisplayName: "Existing Upload",
+		CreatedAt:   createdAt,
+		Total:       &total,
+		Parsed:      &parsed,
+		RideCount:   &rideCount,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	router := apiRouter()
+
+	reqList := httptest.NewRequest("GET", "/uploads", nil)
+	rrList := httptest.NewRecorder()
+	router.ServeHTTP(rrList, reqList)
+
+	if rrList.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d", rrList.Code)
+	}
+
+	var listResp listUploadsResponse
+	if err := json.NewDecoder(rrList.Body).Decode(&listResp); err != nil {
+		t.Fatalf("failed to decode list response: %v", err)
+	}
+
+	if len(listResp.Uploads) != 1 {
+		t.Fatalf("expected one upload, got %d", len(listResp.Uploads))
+	}
+
+	upload := listResp.Uploads[0]
+	if upload.DatasetID != "dataset-123" {
+		t.Fatalf("expected datasetId dataset-123, got %q", upload.DatasetID)
+	}
+	if upload.DisplayName != "Existing Upload" {
+		t.Fatalf("expected display name Existing Upload, got %q", upload.DisplayName)
+	}
+	if upload.Total == nil || *upload.Total != total {
+		t.Fatalf("expected total %d, got %#v", total, upload.Total)
+	}
+
+	renameBody := bytes.NewBufferString(`{"name":"Boston Routes"}`)
+	reqRename := httptest.NewRequest("PATCH", "/uploads/dataset-123", renameBody)
+	reqRename.Header.Set("Content-Type", "application/json")
+	rrRename := httptest.NewRecorder()
+	router.ServeHTTP(rrRename, reqRename)
+
+	if rrRename.Code != http.StatusOK {
+		t.Fatalf("expected rename status 200, got %d", rrRename.Code)
+	}
+
+	var renamed UploadedDataset
+	if err := json.NewDecoder(rrRename.Body).Decode(&renamed); err != nil {
+		t.Fatalf("failed to decode rename response: %v", err)
+	}
+
+	renamedParquetPath := filepath.Join(dataDir, "Boston Routes.parquet")
+	if _, err := os.Stat(renamedParquetPath); err != nil {
+		t.Fatalf("expected renamed parquet file to exist: %v", err)
+	}
+	if renamed.FileName != "Boston Routes.parquet" {
+		t.Fatalf("expected renamed file name to be Boston Routes.parquet, got %q", renamed.FileName)
+	}
+	if renamed.DisplayName != "Boston Routes" {
+		t.Fatalf("expected renamed display name to be Boston Routes, got %q", renamed.DisplayName)
+	}
+
+	openedPath := ""
+	restoreOpenUploadPath := openUploadPath
+	openUploadPath = func(path string) error {
+		openedPath = path
+		return nil
+	}
+	defer func() {
+		openUploadPath = restoreOpenUploadPath
+	}()
+
+	reqOpen := httptest.NewRequest("POST", "/uploads/dataset-123/open", nil)
+	rrOpen := httptest.NewRecorder()
+	router.ServeHTTP(rrOpen, reqOpen)
+
+	if rrOpen.Code != http.StatusNoContent {
+		t.Fatalf("expected open status 204, got %d", rrOpen.Code)
+	}
+	if openedPath != renamedParquetPath {
+		t.Fatalf("expected open path %q, got %q", renamedParquetPath, openedPath)
+	}
+
+	reqDelete := httptest.NewRequest("DELETE", "/uploads/dataset-123", nil)
+	rrDelete := httptest.NewRecorder()
+	router.ServeHTTP(rrDelete, reqDelete)
+
+	if rrDelete.Code != http.StatusNoContent {
+		t.Fatalf("expected delete status 204, got %d", rrDelete.Code)
+	}
+
+	if _, err := os.Stat(renamedParquetPath); !os.IsNotExist(err) {
+		t.Fatalf("expected parquet file to be deleted, stat err = %v", err)
+	}
+	if _, err := os.Stat(uploadMetadataPath(renamedParquetPath)); !os.IsNotExist(err) {
+		t.Fatalf("expected metadata file to be deleted, stat err = %v", err)
+	}
+}
+
 func TestUploadAndFilter(t *testing.T) {
-	// Path to zip test data from root
 	zipPath := "../../data/strava_export.zip"
 	if _, err := os.Stat(zipPath); os.IsNotExist(err) {
 		t.Skip("skipping integration test, test zip file not found")
 	}
 
+	dataDir := filepath.Join(t.TempDir(), "uploads")
+	t.Setenv("MAPTOOLS_DATA_DIR", dataDir)
+
 	router := apiRouter()
 
-	// Prepare multipart form upload
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	fw, err := mw.CreateFormFile("file", filepath.Base(zipPath))
@@ -118,7 +240,6 @@ func TestUploadAndFilter(t *testing.T) {
 	}
 	mw.Close()
 
-	// Perform Upload
 	reqUpload := httptest.NewRequest("POST", "/upload", &buf)
 	reqUpload.Header.Set("Content-Type", mw.FormDataContentType())
 	rrUpload := httptest.NewRecorder()
@@ -137,6 +258,14 @@ func TestUploadAndFilter(t *testing.T) {
 	sessionId, _ := uploadResp["sessionId"].(string)
 	if sessionId == "" {
 		t.Fatal("expected sessionId, got empty string")
+	}
+
+	dataset, ok := uploadResp["dataset"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected dataset payload, got %v", uploadResp["dataset"])
+	}
+	if dataset["datasetId"] != sessionId {
+		t.Fatalf("expected datasetId %q, got %v", sessionId, dataset["datasetId"])
 	}
 
 	if uploadResp["total"] == nil || uploadResp["parsed"] == nil || uploadResp["rideCount"] == nil || uploadResp["summary"] == nil {
@@ -161,14 +290,14 @@ func TestUploadAndFilter(t *testing.T) {
 			t.Errorf("expected summary %q, got %q", expectedSummary, summary)
 		}
 	}
-	// Make sure the parquet file was created in tmp
-	parquetPath := filepath.Join("tmp", "activities-"+sessionId+".parquet")
-	defer os.Remove(parquetPath) // cleanup after test
+
+	parquetPath := filepath.Join(dataDir, "activities-"+sessionId+".parquet")
+	defer os.Remove(parquetPath)
+	defer os.Remove(uploadMetadataPath(parquetPath))
 	if _, err := os.Stat(parquetPath); os.IsNotExist(err) {
 		t.Fatalf("expected parquet file to exist at %s, but it does not", parquetPath)
 	}
 
-	// Perform Filter
 	filterReqBody := FilterRequest{
 		SessionId: sessionId,
 		BBox:      [4]float64{-71.1912, 42.2279, -70.9227, 42.3969},
@@ -188,7 +317,6 @@ func TestUploadAndFilter(t *testing.T) {
 		t.Fatalf("filter failed with status %d: %s", rrFilter.Code, body)
 	}
 
-	// Read and parse geojson output
 	var geojson map[string]interface{}
 	if err := json.NewDecoder(rrFilter.Body).Decode(&geojson); err != nil {
 		t.Fatalf("failed to decode geojson output: %v", err)

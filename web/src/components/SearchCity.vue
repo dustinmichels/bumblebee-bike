@@ -145,7 +145,9 @@ const clearInput = () => {
       </li>
     </ul>
 
-    <div v-if="showError" class="error-message">Could not fetch search results. Please try again.</div>
+    <div v-if="showError" class="error-message">
+      Could not fetch search results. Please try again.
+    </div>
   </div>
 </template>
 

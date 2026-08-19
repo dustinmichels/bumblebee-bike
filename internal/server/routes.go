@@ -9,6 +9,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"time"
+	"unicode"
 
 	"github.com/dustinmichels/bumblebee-bike/internal/strava"
 	"github.com/go-chi/chi/v5"
@@ -19,9 +25,59 @@ func apiRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/health", handleHealth)
 	r.Get("/map-test", handleMapTest)
+	r.Get("/uploads", handleListUploads)
 	r.Post("/upload", handleUpload)
+	r.Post("/uploads/{datasetId}/open", handleOpenUpload)
+	r.Patch("/uploads/{datasetId}", handleRenameUpload)
+	r.Delete("/uploads/{datasetId}", handleDeleteUpload)
 	r.Post("/filter", handleFilter)
 	return r
+}
+
+type UploadedDataset struct {
+	DatasetID   string    `json:"datasetId"`
+	FileName    string    `json:"fileName"`
+	DisplayName string    `json:"displayName"`
+	CreatedAt   time.Time `json:"createdAt"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	Total       *int      `json:"total,omitempty"`
+	Parsed      *int      `json:"parsed,omitempty"`
+	RideCount   *int      `json:"rideCount,omitempty"`
+}
+
+type uploadMetadata struct {
+	DatasetID   string    `json:"datasetId"`
+	DisplayName string    `json:"displayName"`
+	CreatedAt   time.Time `json:"createdAt"`
+	Total       *int      `json:"total,omitempty"`
+	Parsed      *int      `json:"parsed,omitempty"`
+	RideCount   *int      `json:"rideCount,omitempty"`
+}
+
+type uploadRecord struct {
+	dataset      UploadedDataset
+	parquetPath  string
+	metadataPath string
+}
+
+var openUploadPath = revealPathInFileManager
+
+type UploadResponse struct {
+	Status    string          `json:"status"`
+	SessionID string          `json:"sessionId"`
+	Total     int             `json:"total"`
+	Parsed    int             `json:"parsed"`
+	RideCount int             `json:"rideCount"`
+	Summary   string          `json:"summary"`
+	Dataset   UploadedDataset `json:"dataset"`
+}
+
+type listUploadsResponse struct {
+	Uploads []UploadedDataset `json:"uploads"`
+}
+
+type renameUploadRequest struct {
+	Name string `json:"name"`
 }
 
 func handleMapTest(w http.ResponseWriter, r *http.Request) {
@@ -49,16 +105,28 @@ func handleMapTest(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(geoJSONData)
 }
 
+func handleListUploads(w http.ResponseWriter, r *http.Request) {
+	uploads, err := listUploadedDatasets()
+	if err != nil {
+		slog.Error("failed to list uploads", "err", err)
+		http.Error(w, "failed to list uploads", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(listUploadsResponse{Uploads: uploads})
+}
+
 func handleUpload(w http.ResponseWriter, r *http.Request) {
 	slog.Info("received upload request")
 
-	// Limit upload size to 500MB
 	if err := r.ParseMultipartForm(500 << 20); err != nil {
 		slog.Error("failed to parse multipart form", "err", err)
 		http.Error(w, "failed to parse multipart form", http.StatusBadRequest)
 		return
 	}
-	file, _, err := r.FormFile("file")
+
+	file, header, err := r.FormFile("file")
 	if err != nil {
 		slog.Error("failed to get file from form", "err", err)
 		http.Error(w, "invalid file key 'file' in form", http.StatusBadRequest)
@@ -66,53 +134,176 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	if err := os.MkdirAll("tmp", 0755); err != nil {
-		slog.Error("failed to create tmp directory", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	sessionId := uuid.New().String()
-	zipPath := fmt.Sprintf("tmp/upload-%s.zip", sessionId)
-	parquetPath := fmt.Sprintf("tmp/activities-%s.parquet", sessionId)
-
-	out, err := os.Create(zipPath)
+	response, err := processUploadedArchive(file, header.Filename)
 	if err != nil {
-		slog.Error("failed to create zip file", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, file); err != nil {
-		slog.Error("failed to write zip file", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	out.Close()
-
-	slog.Info("processing upload zip", "sessionId", sessionId, "zipPath", zipPath)
-	res, err := strava.IngestZip(zipPath, parquetPath)
-	os.Remove(zipPath)
-
-	if err != nil {
-		slog.Error("ingest failed", "sessionId", sessionId, "err", err)
+		slog.Error("ingest failed", "sessionId", response.SessionID, "err", err)
 		http.Error(w, fmt.Sprintf("ingest failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	summary := fmt.Sprintf("Succesfully parsed %d / %d  activities. %d are type = Ride.", res.Parsed, res.Total, res.RideCount)
-	slog.Info(summary, "sessionId", sessionId, "parquetPath", parquetPath)
+	slog.Info(response.Summary, "sessionId", response.SessionID, "parquetPath", response.Dataset.FileName)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func handleRenameUpload(w http.ResponseWriter, r *http.Request) {
+	datasetID := strings.TrimSpace(chi.URLParam(r, "datasetId"))
+	if datasetID == "" {
+		http.Error(w, "datasetId is required", http.StatusBadRequest)
+		return
+	}
+
+	var req renameUploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	displayName := strings.TrimSpace(req.Name)
+	targetBaseName := sanitizeUploadFileName(displayName)
+	if targetBaseName == "" {
+		http.Error(w, "name must contain letters or numbers", http.StatusBadRequest)
+		return
+	}
+
+	record, err := resolveUploadRecord(datasetID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "upload not found", http.StatusNotFound)
+			return
+		}
+
+		slog.Error("failed to resolve upload for rename", "datasetId", datasetID, "err", err)
+		http.Error(w, "failed to rename upload", http.StatusInternalServerError)
+		return
+	}
+
+	targetDir, err := uploadDataDir()
+	if err != nil {
+		slog.Error("failed to resolve upload data directory", "datasetId", datasetID, "err", err)
+		http.Error(w, "failed to rename upload", http.StatusInternalServerError)
+		return
+	}
+
+	targetParquetPath := filepath.Join(targetDir, targetBaseName+".parquet")
+	if targetParquetPath != record.parquetPath {
+		if _, err := os.Stat(targetParquetPath); err == nil {
+			http.Error(w, "a parquet file with that name already exists", http.StatusConflict)
+			return
+		}
+
+		if err := os.Rename(record.parquetPath, targetParquetPath); err != nil {
+			slog.Error("failed to rename parquet file", "datasetId", datasetID, "err", err)
+			http.Error(w, "failed to rename upload", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	targetMetadataPath := uploadMetadataPath(targetParquetPath)
+	if targetMetadataPath != record.metadataPath && fileExists(record.metadataPath) {
+		if err := os.Rename(record.metadataPath, targetMetadataPath); err != nil {
+			slog.Error("failed to rename upload metadata", "datasetId", datasetID, "err", err)
+			http.Error(w, "failed to rename upload metadata", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	metadata := uploadMetadata{
+		DatasetID:   record.dataset.DatasetID,
+		DisplayName: displayName,
+		CreatedAt:   record.dataset.CreatedAt,
+		Total:       record.dataset.Total,
+		Parsed:      record.dataset.Parsed,
+		RideCount:   record.dataset.RideCount,
+	}
+	if err := writeUploadMetadata(targetMetadataPath, metadata); err != nil {
+		slog.Error("failed to write upload metadata", "datasetId", datasetID, "err", err)
+		http.Error(w, "failed to rename upload", http.StatusInternalServerError)
+		return
+	}
+
+	info, err := os.Stat(targetParquetPath)
+	if err != nil {
+		slog.Error("failed to stat renamed upload", "datasetId", datasetID, "err", err)
+		http.Error(w, "failed to rename upload", http.StatusInternalServerError)
+		return
+	}
+
+	updated := UploadedDataset{
+		DatasetID:   record.dataset.DatasetID,
+		FileName:    filepath.Base(targetParquetPath),
+		DisplayName: displayName,
+		CreatedAt:   record.dataset.CreatedAt,
+		SizeBytes:   info.Size(),
+		Total:       record.dataset.Total,
+		Parsed:      record.dataset.Parsed,
+		RideCount:   record.dataset.RideCount,
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":    "success",
-		"sessionId": sessionId,
-		"total":     res.Total,
-		"parsed":    res.Parsed,
-		"rideCount": res.RideCount,
-		"summary":   summary,
-	})
+	_ = json.NewEncoder(w).Encode(updated)
+}
+
+func handleOpenUpload(w http.ResponseWriter, r *http.Request) {
+	datasetID := strings.TrimSpace(chi.URLParam(r, "datasetId"))
+	if datasetID == "" {
+		http.Error(w, "datasetId is required", http.StatusBadRequest)
+		return
+	}
+
+	record, err := resolveUploadRecord(datasetID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "upload not found", http.StatusNotFound)
+			return
+		}
+
+		slog.Error("failed to resolve upload for open", "datasetId", datasetID, "err", err)
+		http.Error(w, "failed to open upload", http.StatusInternalServerError)
+		return
+	}
+
+	if err := openUploadPath(record.parquetPath); err != nil {
+		slog.Error("failed to open upload in file manager", "datasetId", datasetID, "parquetPath", record.parquetPath, "err", err)
+		http.Error(w, "failed to open upload", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleDeleteUpload(w http.ResponseWriter, r *http.Request) {
+	datasetID := strings.TrimSpace(chi.URLParam(r, "datasetId"))
+	if datasetID == "" {
+		http.Error(w, "datasetId is required", http.StatusBadRequest)
+		return
+	}
+
+	record, err := resolveUploadRecord(datasetID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "upload not found", http.StatusNotFound)
+			return
+		}
+
+		slog.Error("failed to resolve upload for delete", "datasetId", datasetID, "err", err)
+		http.Error(w, "failed to delete upload", http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.Remove(record.parquetPath); err != nil && !os.IsNotExist(err) {
+		slog.Error("failed to remove parquet file", "datasetId", datasetID, "err", err)
+		http.Error(w, "failed to delete upload", http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.Remove(record.metadataPath); err != nil && !os.IsNotExist(err) {
+		slog.Error("failed to remove upload metadata", "datasetId", datasetID, "err", err)
+		http.Error(w, "failed to delete upload metadata", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type FilterRequest struct {
@@ -130,16 +321,16 @@ func handleFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := uuid.Parse(req.SessionId); err != nil {
-		slog.Error("invalid sessionId format", "sessionId", req.SessionId, "err", err)
-		http.Error(w, "invalid sessionId format", http.StatusBadRequest)
-		return
-	}
+	record, err := resolveUploadRecord(req.SessionId)
+	if err != nil {
+		if os.IsNotExist(err) {
+			slog.Error("session parquet file not found", "sessionId", req.SessionId)
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
 
-	parquetPath := fmt.Sprintf("tmp/activities-%s.parquet", req.SessionId)
-	if _, err := os.Stat(parquetPath); os.IsNotExist(err) {
-		slog.Error("session parquet file not found", "sessionId", req.SessionId)
-		http.Error(w, "session not found", http.StatusNotFound)
+		slog.Error("failed to resolve session parquet file", "sessionId", req.SessionId, "err", err)
+		http.Error(w, "failed to resolve session", http.StatusInternalServerError)
 		return
 	}
 
@@ -150,7 +341,7 @@ func handleFilter(w http.ResponseWriter, r *http.Request) {
 		req.BBox[0], req.BBox[1], req.BBox[2], req.BBox[3],
 	)
 
-	geoJSONData, err := exportGeoJSONFromParquet(parquetPath, whereClause)
+	geoJSONData, err := exportGeoJSONFromParquet(record.parquetPath, whereClause)
 	if err != nil {
 		slog.Error("duckdb filter query failed", "err", err)
 		http.Error(w, fmt.Sprintf("filter query failed: %v", err), http.StatusInternalServerError)
@@ -163,11 +354,19 @@ func handleFilter(w http.ResponseWriter, r *http.Request) {
 }
 
 func exportGeoJSONFromParquet(parquetPath, whereClause string) ([]byte, error) {
-	if err := os.MkdirAll("tmp", 0755); err != nil {
+	outputFile, err := os.CreateTemp("", "maptools-output-*.geojson")
+	if err != nil {
 		return nil, err
 	}
 
-	outputGeoJSON := fmt.Sprintf("tmp/output-%s.geojson", uuid.New().String()[:8])
+	outputGeoJSON := outputFile.Name()
+	if err := outputFile.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(outputGeoJSON); err != nil {
+		return nil, err
+	}
+
 	query := fmt.Sprintf(`INSTALL spatial;
 LOAD spatial;
 SET geometry_always_xy = true;
@@ -176,9 +375,9 @@ COPY (
   FROM read_parquet('%s')
   %s
 ) TO '%s' WITH (FORMAT 'GDAL', DRIVER 'GeoJSON');`,
-		parquetPath,
+		quoteDuckDBPath(parquetPath),
 		whereClause,
-		outputGeoJSON,
+		quoteDuckDBPath(outputGeoJSON),
 	)
 
 	cmd := exec.Command("duckdb", "-c", query)
@@ -190,6 +389,348 @@ COPY (
 	defer os.Remove(outputGeoJSON)
 
 	return os.ReadFile(outputGeoJSON)
+}
+
+func processUploadedArchive(file io.Reader, originalFilename string) (UploadResponse, error) {
+	response := UploadResponse{}
+
+	uploadDir, err := uploadDataDir()
+	if err != nil {
+		return response, err
+	}
+
+	sessionID := uuid.New().String()
+	parquetPath := filepath.Join(uploadDir, "activities-"+sessionID+".parquet")
+
+	zipFile, err := os.CreateTemp("", "maptools-upload-*.zip")
+	if err != nil {
+		return response, err
+	}
+
+	zipPath := zipFile.Name()
+	if _, err := io.Copy(zipFile, file); err != nil {
+		zipFile.Close()
+		_ = os.Remove(zipPath)
+		return response, err
+	}
+	if err := zipFile.Close(); err != nil {
+		_ = os.Remove(zipPath)
+		return response, err
+	}
+
+	slog.Info("processing upload zip", "sessionId", sessionID, "zipPath", zipPath)
+	res, err := strava.IngestZip(zipPath, parquetPath)
+	_ = os.Remove(zipPath)
+	if err != nil {
+		_ = os.Remove(parquetPath)
+		return UploadResponse{SessionID: sessionID}, err
+	}
+
+	createdAt := time.Now().UTC()
+	displayName := defaultDisplayName(originalFilename)
+	if displayName == "" {
+		displayName = "activities-" + sessionID
+	}
+
+	total := res.Total
+	parsed := res.Parsed
+	rideCount := res.RideCount
+	metadata := uploadMetadata{
+		DatasetID:   sessionID,
+		DisplayName: displayName,
+		CreatedAt:   createdAt,
+		Total:       &total,
+		Parsed:      &parsed,
+		RideCount:   &rideCount,
+	}
+	if err := writeUploadMetadata(uploadMetadataPath(parquetPath), metadata); err != nil {
+		return UploadResponse{SessionID: sessionID}, err
+	}
+
+	info, err := os.Stat(parquetPath)
+	if err != nil {
+		return UploadResponse{SessionID: sessionID}, err
+	}
+
+	summary := fmt.Sprintf("Succesfully parsed %d / %d  activities. %d are type = Ride.", res.Parsed, res.Total, res.RideCount)
+	return UploadResponse{
+		Status:    "success",
+		SessionID: sessionID,
+		Total:     res.Total,
+		Parsed:    res.Parsed,
+		RideCount: res.RideCount,
+		Summary:   summary,
+		Dataset: UploadedDataset{
+			DatasetID:   sessionID,
+			FileName:    filepath.Base(parquetPath),
+			DisplayName: displayName,
+			CreatedAt:   createdAt,
+			SizeBytes:   info.Size(),
+			Total:       &total,
+			Parsed:      &parsed,
+			RideCount:   &rideCount,
+		},
+	}, nil
+}
+
+func listUploadedDatasets() ([]UploadedDataset, error) {
+	records, err := listUploadRecords()
+	if err != nil {
+		return nil, err
+	}
+
+	uploads := make([]UploadedDataset, 0, len(records))
+	for _, record := range records {
+		uploads = append(uploads, record.dataset)
+	}
+
+	return uploads, nil
+}
+
+func resolveUploadRecord(datasetID string) (uploadRecord, error) {
+	if strings.TrimSpace(datasetID) == "" {
+		return uploadRecord{}, os.ErrNotExist
+	}
+
+	records, err := listUploadRecords()
+	if err != nil {
+		return uploadRecord{}, err
+	}
+
+	for _, record := range records {
+		if record.dataset.DatasetID == datasetID {
+			return record, nil
+		}
+	}
+
+	return uploadRecord{}, os.ErrNotExist
+}
+
+func listUploadRecords() ([]uploadRecord, error) {
+	uploadDirs, err := uploadSearchDirs()
+	if err != nil {
+		return nil, err
+	}
+
+	records := make([]uploadRecord, 0)
+	seenDatasetIDs := make(map[string]struct{})
+	for _, uploadDir := range uploadDirs {
+		entries, err := os.ReadDir(uploadDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".parquet" {
+				continue
+			}
+
+			record, err := buildUploadRecord(uploadDir, entry)
+			if err != nil {
+				return nil, err
+			}
+			if _, seen := seenDatasetIDs[record.dataset.DatasetID]; seen {
+				continue
+			}
+
+			seenDatasetIDs[record.dataset.DatasetID] = struct{}{}
+			records = append(records, record)
+		}
+	}
+
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].dataset.CreatedAt.After(records[j].dataset.CreatedAt)
+	})
+
+	return records, nil
+}
+
+func uploadSearchDirs() ([]string, error) {
+	primaryDir, err := uploadDataDir()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(os.Getenv("MAPTOOLS_DATA_DIR")) != "" {
+		return []string{primaryDir}, nil
+	}
+
+	primaryAbs, err := filepath.Abs(primaryDir)
+	if err != nil {
+		return nil, err
+	}
+
+	legacyDir := filepath.Clean("tmp")
+	legacyAbs, err := filepath.Abs(legacyDir)
+	if err != nil {
+		return nil, err
+	}
+	if legacyAbs == primaryAbs {
+		return []string{primaryDir}, nil
+	}
+
+	return []string{primaryDir, legacyDir}, nil
+}
+
+func uploadDataDir() (string, error) {
+	overrideDir := strings.TrimSpace(os.Getenv("MAPTOOLS_DATA_DIR"))
+	if overrideDir != "" {
+		if err := os.MkdirAll(overrideDir, 0755); err != nil {
+			return "", err
+		}
+		return overrideDir, nil
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	uploadDir := ""
+	switch runtime.GOOS {
+	case "darwin":
+		uploadDir = filepath.Join(homeDir, "Library", "Application Support", "MapTools", "data")
+	case "windows":
+		appDataDir, err := os.UserConfigDir()
+		if err != nil {
+			return "", err
+		}
+		uploadDir = filepath.Join(appDataDir, "MapTools", "data")
+	default:
+		dataHomeDir := strings.TrimSpace(os.Getenv("XDG_DATA_HOME"))
+		if dataHomeDir == "" {
+			dataHomeDir = filepath.Join(homeDir, ".local", "share")
+		}
+		uploadDir = filepath.Join(dataHomeDir, "MapTools", "data")
+	}
+
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return "", err
+	}
+
+	return uploadDir, nil
+}
+
+func buildUploadRecord(uploadDir string, entry os.DirEntry) (uploadRecord, error) {
+	parquetPath := filepath.Join(uploadDir, entry.Name())
+	info, err := entry.Info()
+	if err != nil {
+		return uploadRecord{}, err
+	}
+
+	record := uploadRecord{
+		dataset: UploadedDataset{
+			DatasetID:   strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())),
+			FileName:    entry.Name(),
+			DisplayName: strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())),
+			CreatedAt:   info.ModTime(),
+			SizeBytes:   info.Size(),
+		},
+		parquetPath:  parquetPath,
+		metadataPath: uploadMetadataPath(parquetPath),
+	}
+
+	if metadata, err := readUploadMetadata(record.metadataPath); err == nil {
+		if metadata.DatasetID != "" {
+			record.dataset.DatasetID = metadata.DatasetID
+		}
+		if strings.TrimSpace(metadata.DisplayName) != "" {
+			record.dataset.DisplayName = metadata.DisplayName
+		}
+		if !metadata.CreatedAt.IsZero() {
+			record.dataset.CreatedAt = metadata.CreatedAt
+		}
+		record.dataset.Total = metadata.Total
+		record.dataset.Parsed = metadata.Parsed
+		record.dataset.RideCount = metadata.RideCount
+	} else if !os.IsNotExist(err) {
+		return uploadRecord{}, err
+	}
+
+	return record, nil
+}
+
+func readUploadMetadata(path string) (uploadMetadata, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return uploadMetadata{}, err
+	}
+
+	var metadata uploadMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return uploadMetadata{}, err
+	}
+
+	return metadata, nil
+}
+
+func writeUploadMetadata(path string, metadata uploadMetadata) error {
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0644)
+}
+
+func uploadMetadataPath(parquetPath string) string {
+	return strings.TrimSuffix(parquetPath, filepath.Ext(parquetPath)) + ".upload.json"
+}
+
+func quoteDuckDBPath(path string) string {
+	return strings.ReplaceAll(filepath.ToSlash(path), "'", "''")
+}
+
+func revealPathInFileManager(path string) error {
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", "-R", absolutePath).Run()
+	case "windows":
+		return exec.Command("explorer.exe", "/select,", absolutePath).Run()
+	default:
+		return exec.Command("xdg-open", filepath.Dir(absolutePath)).Run()
+	}
+}
+
+func defaultDisplayName(filename string) string {
+	name := strings.TrimSpace(strings.TrimSuffix(filename, filepath.Ext(filename)))
+	return name
+}
+
+func sanitizeUploadFileName(name string) string {
+	name = strings.TrimSpace(strings.TrimSuffix(name, filepath.Ext(name)))
+	if name == "" {
+		return ""
+	}
+
+	var builder strings.Builder
+	lastSeparator := false
+	for _, r := range name {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			builder.WriteRune(r)
+			lastSeparator = false
+		case r == ' ' || r == '-' || r == '_':
+			if !lastSeparator {
+				builder.WriteRune(r)
+				lastSeparator = true
+			}
+		default:
+			if !lastSeparator {
+				builder.WriteRune('-')
+				lastSeparator = true
+			}
+		}
+	}
+
+	return strings.Trim(builder.String(), " -_")
 }
 
 type HealthResponse struct {

@@ -423,11 +423,7 @@ const initMap = () => {
 
     for (const layerId of ["bbox-fill", "bbox-line"]) {
       if (map.value.getLayer(layerId)) {
-        map.value.setLayoutProperty(
-          layerId,
-          "visibility",
-          props.showBBox ? "visible" : "none",
-        );
+        map.value.setLayoutProperty(layerId, "visibility", props.showBBox ? "visible" : "none");
       }
     }
 

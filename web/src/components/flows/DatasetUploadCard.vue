@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, useSlots } from "vue";
 import { formatFileSize } from "../../lib/activity";
 
 const props = withDefaults(
@@ -13,12 +13,16 @@ const props = withDefaults(
     totalCount: number | null;
     parsedCount: number | null;
     rideCount: number | null;
+    activeDatasetName?: string | null;
+    usingExistingDataset?: boolean;
     color?: string;
     colorLabel?: string;
     showColorPicker?: boolean;
     uploadLabel?: string;
   }>(),
   {
+    activeDatasetName: null,
+    usingExistingDataset: false,
     color: "#ff9900",
     colorLabel: "Route color",
     showColorPicker: false,
@@ -32,6 +36,7 @@ const emit = defineEmits<{
   updateColor: [color: string];
 }>();
 
+const slots = useSlots();
 const isDragging = ref(false);
 
 const fileListChanged = (event: Event) => {
@@ -54,8 +59,16 @@ const droppedFile = (event: DragEvent) => {
       </div>
       <label v-if="showColorPicker" class="color-control">
         <span>{{ colorLabel }}</span>
-        <input :value="color" type="color" @input="emit('updateColor', ($event.target as HTMLInputElement).value)" />
+        <input
+          :value="color"
+          type="color"
+          @input="emit('updateColor', ($event.target as HTMLInputElement).value)"
+        />
       </label>
+    </div>
+
+    <div v-if="slots.sourceSelection" class="source-selection">
+      <slot name="sourceSelection" />
     </div>
 
     <div
@@ -83,14 +96,22 @@ const droppedFile = (event: DragEvent) => {
     </div>
 
     <div v-if="uploadSuccess" class="success-banner upload-success">
-      <strong>Archive ready.</strong>
-      <span>
+      <strong>{{ usingExistingDataset ? "Saved upload selected." : "Archive ready." }}</strong>
+      <span v-if="usingExistingDataset">
+        Using {{ activeDatasetName ?? "the selected GeoParquet file" }} from your local upload
+        library.
+      </span>
+      <span v-else>
         Successfully parsed {{ parsedCount }} / {{ totalCount }} activities. {{ rideCount }} are
         rides.
       </span>
     </div>
 
-    <button class="btn btn-primary" :disabled="!selectedFile || isUploading || uploadSuccess" @click="emit('upload')">
+    <button
+      class="btn btn-primary"
+      :disabled="!selectedFile || isUploading || uploadSuccess"
+      @click="emit('upload')"
+    >
       {{ uploadLabel }}
     </button>
   </section>
@@ -119,6 +140,12 @@ const droppedFile = (event: DragEvent) => {
   margin: 0;
   color: #b0b0b0;
   line-height: 1.5;
+}
+
+.source-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .color-control {

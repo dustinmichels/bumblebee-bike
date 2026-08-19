@@ -6,6 +6,7 @@ const route = useRoute();
 const router = useRouter();
 
 const activeTool = computed(() => {
+  if (route.path === "/upload") return "upload";
   if (route.path === "/lightning-map") return "lightning-map";
   if (route.path === "/compare") return "compare";
   return "home";
@@ -42,10 +43,19 @@ const onSelectTool = (tool: string) => {
       </div>
 
       <div class="header-side">
+        <button
+          v-if="activeTool !== 'upload'"
+          class="btn btn-secondary"
+          @click="router.push('/upload')"
+        >
+          Uploads
+        </button>
         <button v-if="activeTool !== 'home'" class="btn btn-secondary" @click="router.push('/')">
           All Tools
         </button>
-        <div class="api-badge" :class="health">API status: <code>{{ health ?? "…" }}</code></div>
+        <div class="api-badge" :class="health">
+          API status: <code>{{ health ?? "…" }}</code>
+        </div>
       </div>
     </header>
 

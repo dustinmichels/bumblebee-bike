@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onMounted, ref, watch } from "vue";
 import AreaSelectionCard from "./AreaSelectionCard.vue";
 import DatasetUploadCard from "./DatasetUploadCard.vue";
 import FlowStepper from "./FlowStepper.vue";
+import UploadedDatasetList from "../uploads/UploadedDatasetList.vue";
 import { useActivityDataset } from "../../composables/useActivityDataset";
+import { useUploadedDatasets } from "../../composables/useUploadedDatasets";
 import {
   DEFAULT_BOSTON_BBOX,
   DEFAULT_BOSTON_CENTER,
@@ -30,6 +32,7 @@ const personOneColor = ref("#ff8c00");
 const personTwoColor = ref("#2563eb");
 const personOne = useActivityDataset();
 const personTwo = useActivityDataset();
+const uploadLibrary = useUploadedDatasets();
 
 const compareRoutes = computed<RouteLayer[]>(() => [
   {
@@ -50,14 +53,16 @@ const totalComparedActivities = computed(
   () => (personOne.activitiesCount.value ?? 0) + (personTwo.activitiesCount.value ?? 0),
 );
 
-const hasBothUploads = computed(() => personOne.uploadSuccess.value && personTwo.uploadSuccess.value);
+const hasBothUploads = computed(
+  () => personOne.uploadSuccess.value && personTwo.uploadSuccess.value,
+);
 const isFiltering = computed(() => personOne.isFiltering.value || personTwo.isFiltering.value);
 const hasResults = computed(
   () => personOne.activitiesCount.value !== null && personTwo.activitiesCount.value !== null,
 );
 const filterErrors = computed(() =>
-  [personOne.filterError.value, personTwo.filterError.value].filter(
-    (message): message is string => Boolean(message),
+  [personOne.filterError.value, personTwo.filterError.value].filter((message): message is string =>
+    Boolean(message),
   ),
 );
 
@@ -67,14 +72,35 @@ const handleSelectCity = (payload: SelectedCity) => {
   center.value = [payload.lon, payload.lat];
 };
 
+const submitPersonOneArchive = async () => {
+  const upload = await personOne.submitZip();
+  if (upload) {
+    await uploadLibrary.loadUploads();
+  }
+};
+
+const submitPersonTwoArchive = async () => {
+  const upload = await personTwo.submitZip();
+  if (upload) {
+    await uploadLibrary.loadUploads();
+  }
+};
+
 const runCompare = async () => {
-  await Promise.all([personOne.filterActivities(bbox.value), personTwo.filterActivities(bbox.value)]);
+  await Promise.all([
+    personOne.filterActivities(bbox.value),
+    personTwo.filterActivities(bbox.value),
+  ]);
 };
 
 watch(currentStep, (step) => {
   if (step === 3 && hasBothUploads.value) {
     void runCompare();
   }
+});
+
+onMounted(() => {
+  void uploadLibrary.loadUploads();
 });
 
 const resetFlow = () => {
@@ -97,7 +123,7 @@ const resetFlow = () => {
       <div class="compare-upload-grid">
         <DatasetUploadCard
           title="Person 1"
-          description="Upload the first Strava bulk export ZIP and pick the route color for this rider."
+          description="Reuse a saved GeoParquet file or upload the first Strava bulk export ZIP."
           :selected-file="personOne.selectedFile.value"
           :upload-error="personOne.uploadError.value"
           :is-uploading="personOne.isUploading.value"
@@ -105,16 +131,31 @@ const resetFlow = () => {
           :total-count="personOne.totalCount.value"
           :parsed-count="personOne.parsedCount.value"
           :ride-count="personOne.rideCount.value"
+          :active-dataset-name="personOne.activeDataset.value?.displayName ?? null"
+          :using-existing-dataset="personOne.usingExistingDataset.value"
           :color="personOneColor"
           color-label="Route color"
           :show-color-picker="true"
           @select-file="personOne.setSelectedFile"
-          @upload="personOne.submitZip"
+          @upload="submitPersonOneArchive"
           @update-color="personOneColor = $event"
-        />
+        >
+          <template #sourceSelection>
+            <UploadedDatasetList
+              v-if="uploadLibrary.uploads.value.length"
+              title="Saved uploads"
+              description="Select a GeoParquet file you already processed, or upload a fresh archive below."
+              :uploads="uploadLibrary.uploads.value"
+              :selected-dataset-id="personOne.activeDataset.value?.datasetId ?? null"
+              :selectable="true"
+              action-label="Use saved upload"
+              @select="personOne.useExistingDataset"
+            />
+          </template>
+        </DatasetUploadCard>
         <DatasetUploadCard
           title="Person 2"
-          description="Upload the second export ZIP. Both riders will be filtered against the same area on the map."
+          description="Reuse another saved GeoParquet file or upload the second Strava bulk export ZIP."
           :selected-file="personTwo.selectedFile.value"
           :upload-error="personTwo.uploadError.value"
           :is-uploading="personTwo.isUploading.value"
@@ -122,19 +163,39 @@ const resetFlow = () => {
           :total-count="personTwo.totalCount.value"
           :parsed-count="personTwo.parsedCount.value"
           :ride-count="personTwo.rideCount.value"
+          :active-dataset-name="personTwo.activeDataset.value?.displayName ?? null"
+          :using-existing-dataset="personTwo.usingExistingDataset.value"
           :color="personTwoColor"
           color-label="Route color"
           :show-color-picker="true"
           @select-file="personTwo.setSelectedFile"
-          @upload="personTwo.submitZip"
+          @upload="submitPersonTwoArchive"
           @update-color="personTwoColor = $event"
-        />
+        >
+          <template #sourceSelection>
+            <UploadedDatasetList
+              v-if="uploadLibrary.uploads.value.length"
+              title="Saved uploads"
+              description="Pick an existing GeoParquet file, or upload another ZIP below."
+              :uploads="uploadLibrary.uploads.value"
+              :selected-dataset-id="personTwo.activeDataset.value?.datasetId ?? null"
+              :selectable="true"
+              :show-manage-link="true"
+              action-label="Use saved upload"
+              @select="personTwo.useExistingDataset"
+            />
+          </template>
+        </DatasetUploadCard>
+      </div>
+
+      <div v-if="uploadLibrary.error.value" class="error-banner">
+        ⚠️ {{ uploadLibrary.error.value }}
       </div>
 
       <div class="card compare-hint">
         <h2>Compare two people on one map</h2>
         <p>
-          Upload both archives first. After that you'll choose one shared area and overlay both ride
+          Choose both uploads first. After that you'll select one shared area and overlay both ride
           collections on the same basemap.
         </p>
       </div>
@@ -170,7 +231,9 @@ const resetFlow = () => {
       </div>
 
       <div v-else-if="filterErrors.length" class="error-stack">
-        <div v-for="message in filterErrors" :key="message" class="error-banner">⚠️ {{ message }}</div>
+        <div v-for="message in filterErrors" :key="message" class="error-banner">
+          ⚠️ {{ message }}
+        </div>
         <div class="mt-4 retry-actions">
           <button class="btn btn-primary" @click="runCompare">Retry both</button>
         </div>
@@ -180,7 +243,8 @@ const resetFlow = () => {
         <h3>Comparison ready</h3>
         <p class="lead-text compact-lead">
           Found <strong>{{ totalComparedActivities }}</strong> total rides inside
-          <strong>{{ cityName }}</strong>.
+          <strong>{{ cityName }}</strong
+          >.
         </p>
       </div>
 
@@ -188,7 +252,11 @@ const resetFlow = () => {
         <button class="btn btn-secondary" :disabled="isFiltering" @click="currentStep = 2">
           Back
         </button>
-        <button class="btn btn-primary" :disabled="!hasResults || isFiltering" @click="currentStep = 4">
+        <button
+          class="btn btn-primary"
+          :disabled="!hasResults || isFiltering"
+          @click="currentStep = 4"
+        >
           Next
         </button>
       </div>
@@ -198,8 +266,9 @@ const resetFlow = () => {
       <section class="card flow-card final-card">
         <h2>Compare</h2>
         <p>
-          Overlaying <strong>{{ totalComparedActivities }}</strong> rides from both uploaded
-          exports inside <strong>{{ cityName }}</strong>.
+          Overlaying <strong>{{ totalComparedActivities }}</strong> rides from both uploaded exports
+          inside <strong>{{ cityName }}</strong
+          >.
         </p>
 
         <div class="compare-legend">
@@ -209,7 +278,12 @@ const resetFlow = () => {
               <strong>Person 1</strong>
               <span>{{ personOne.activitiesCount.value }} rides</span>
             </div>
-            <input v-model="personOneColor" type="color" class="legend-picker" aria-label="Person 1 color" />
+            <input
+              v-model="personOneColor"
+              type="color"
+              class="legend-picker"
+              aria-label="Person 1 color"
+            />
           </div>
           <div class="legend-row">
             <span class="legend-swatch" :style="{ backgroundColor: personTwoColor }"></span>
@@ -217,7 +291,12 @@ const resetFlow = () => {
               <strong>Person 2</strong>
               <span>{{ personTwo.activitiesCount.value }} rides</span>
             </div>
-            <input v-model="personTwoColor" type="color" class="legend-picker" aria-label="Person 2 color" />
+            <input
+              v-model="personTwoColor"
+              type="color"
+              class="legend-picker"
+              aria-label="Person 2 color"
+            />
           </div>
         </div>
 

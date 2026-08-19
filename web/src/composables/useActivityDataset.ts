@@ -1,5 +1,11 @@
 import { computed, ref } from "vue";
-import type { BBox, GeoJSONFeatureCollection, UploadSummary } from "../lib/activity";
+import type {
+  BBox,
+  GeoJSONFeatureCollection,
+  UploadSummary,
+  UploadedDataset,
+} from "../lib/activity";
+import { uploadArchive } from "../lib/uploads";
 
 const ZIP_ERROR_MESSAGE = "Please select a .zip archive.";
 
@@ -12,6 +18,8 @@ export function useActivityDataset() {
   const totalCount = ref<number | null>(null);
   const parsedCount = ref<number | null>(null);
   const rideCount = ref<number | null>(null);
+  const activeDataset = ref<UploadedDataset | null>(null);
+  const usingExistingDataset = ref(false);
 
   const isFiltering = ref(false);
   const filterError = ref<string | null>(null);
@@ -30,6 +38,19 @@ export function useActivityDataset() {
     totalCount.value = null;
     parsedCount.value = null;
     rideCount.value = null;
+    activeDataset.value = null;
+    usingExistingDataset.value = false;
+    clearFilterState();
+  };
+
+  const applyUploadedDataset = (upload: UploadedDataset, fromExisting: boolean) => {
+    sessionId.value = upload.datasetId;
+    totalCount.value = upload.total ?? null;
+    parsedCount.value = upload.parsed ?? null;
+    rideCount.value = upload.rideCount ?? null;
+    activeDataset.value = upload;
+    usingExistingDataset.value = fromExisting;
+    uploadSuccess.value = true;
     clearFilterState();
   };
 
@@ -53,7 +74,7 @@ export function useActivityDataset() {
 
   const submitZip = async () => {
     if (!selectedFile.value) {
-      return;
+      return null;
     }
 
     isUploading.value = true;
@@ -61,31 +82,27 @@ export function useActivityDataset() {
     clearUploadState();
 
     try {
-      const formData = new FormData();
-      formData.append("file", selectedFile.value);
-
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Server returned status ${res.status}`);
-      }
-
-      const data = (await res.json()) as UploadSummary;
-      sessionId.value = data.sessionId;
+      const data = (await uploadArchive(selectedFile.value)) as UploadSummary;
+      applyUploadedDataset(data.dataset, false);
       totalCount.value = data.total;
       parsedCount.value = data.parsed;
       rideCount.value = data.rideCount;
-      uploadSuccess.value = true;
+      return data;
     } catch (error) {
       console.error(error);
-      uploadError.value = error instanceof Error ? error.message : "An error occurred during upload.";
+      uploadError.value =
+        error instanceof Error ? error.message : "An error occurred during upload.";
+      return null;
     } finally {
       isUploading.value = false;
     }
+  };
+
+  const useExistingDataset = (upload: UploadedDataset) => {
+    selectedFile.value = null;
+    uploadError.value = null;
+    clearUploadState();
+    applyUploadedDataset(upload, true);
   };
 
   const filterActivities = async (bbox: BBox) => {
@@ -142,6 +159,8 @@ export function useActivityDataset() {
     totalCount,
     parsedCount,
     rideCount,
+    activeDataset,
+    usingExistingDataset,
     isFiltering,
     filterError,
     activitiesCount,
@@ -149,6 +168,7 @@ export function useActivityDataset() {
     readyToFilter: computed(() => uploadSuccess.value && sessionId.value !== null),
     setSelectedFile,
     submitZip,
+    useExistingDataset,
     filterActivities,
     reset,
   };

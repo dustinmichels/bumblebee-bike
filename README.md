@@ -40,6 +40,18 @@ Run tasks using `mise run <task>` (or the shorthand `mise r <task>`):
   ```
   Builds and runs the compiled binary.
 
+
+### Persistent Upload Storage
+
+Processed GeoParquet uploads are stored outside the repository so the compiled app can be launched from anywhere without changing where your saved datasets live.
+
+- **macOS:** `~/Library/Application Support/MapTools/data`
+- **Linux:** `$XDG_DATA_HOME/MapTools/data`, or `~/.local/share/MapTools/data` when `XDG_DATA_HOME` is unset
+- **Windows:** `%AppData%\MapTools\data`
+
+You can override the storage location with `MAPTOOLS_DATA_DIR=/absolute/path/to/data`.
+
+Short-lived ZIP and GeoJSON scratch files are written to the operating system temp directory and deleted after processing. The Uploads page includes an **Open File** button beside each saved dataset so you can reveal it in Finder or your file manager. Older `.parquet` files that already exist in a repo-local `tmp/` directory still appear in the Uploads page so existing local runs stay usable.
 * **Format Code:**
   ```bash
   mise run fmt
