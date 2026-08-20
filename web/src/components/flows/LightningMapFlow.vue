@@ -18,11 +18,10 @@ import {
 const MapView = defineAsyncComponent(() => import("../MapView.vue"));
 
 const steps = [
-  { number: 1, label: "Export" },
-  { number: 2, label: "Upload" },
-  { number: 3, label: "Area" },
-  { number: 4, label: "Process" },
-  { number: 5, label: "Map" },
+  { number: 1, label: "Upload" },
+  { number: 2, label: "Area" },
+  { number: 3, label: "Process" },
+  { number: 4, label: "Map" },
 ];
 
 const currentStep = ref(1);
@@ -55,7 +54,7 @@ const submitSelectedArchive = async () => {
 };
 
 watch(currentStep, (step) => {
-  if (step === 4 && dataset.readyToFilter.value) {
+  if (step === 3 && dataset.readyToFilter.value) {
     void dataset.filterActivities(bbox.value);
   }
 });
@@ -77,45 +76,10 @@ const resetFlow = () => {
   <section class="flow-layout">
     <FlowStepper :current-step="currentStep" :steps="steps" />
 
-    <div v-if="currentStep === 1" class="card flow-card">
-      <h2>Step 1: Download your Strava bulk export</h2>
-      <div class="step-instructions">
-        <p>
-          Lightning Map starts from the same archive flow you already had. Request your Strava bulk
-          export, then bring the downloaded ZIP back here.
-        </p>
-        <ol>
-          <li>
-            Log into <a href="https://www.strava.com" target="_blank" class="link">Strava</a>
-            on your computer.
-          </li>
-          <li>Open <strong>Settings</strong>, then choose <strong>My Account</strong>.</li>
-          <li>
-            Scroll to <strong>Download or Delete Your Account</strong> and choose
-            <strong>Get Started</strong>.
-          </li>
-          <li>Click <strong>Request Your Archive</strong>.</li>
-          <li>Download the ZIP link from the email Strava sends you.</li>
-        </ol>
-        <p>
-          Need the original guide?
-          <a
-            href="https://support.strava.com/en-us/articles/15401919-exporting-your-data-and-bulk-export"
-            target="_blank"
-            class="link"
-            >Read Strava's bulk export instructions</a
-          >.
-        </p>
-      </div>
-      <div class="card-actions">
-        <button class="btn btn-primary" @click="currentStep = 2">Next</button>
-      </div>
-    </div>
-
-    <div v-else-if="currentStep === 2" class="flow-layout">
+    <div v-if="currentStep === 1" class="flow-layout">
       <DatasetUploadCard
-        title="Step 2: Choose a saved upload or process a new ZIP"
-        description="Reuse a GeoParquet file you already processed, or select a new Strava export archive and create one now."
+        title="Step 1: Load a saved upload or ZIP"
+        description="Pick a saved GeoParquet dataset or process one Strava ZIP."
         :selected-file="dataset.selectedFile.value"
         :upload-error="dataset.uploadError.value"
         :is-uploading="dataset.isUploading.value"
@@ -131,13 +95,13 @@ const resetFlow = () => {
         <template #sourceSelection>
           <UploadedDatasetList
             v-if="uploadLibrary.uploads.value.length"
-            title="Already uploaded"
-            description="Skip ZIP processing by picking a saved GeoParquet file, or upload a new archive below."
+            title="Saved uploads"
+            description="Pick one to skip ZIP processing."
             :uploads="uploadLibrary.uploads.value"
             :selected-dataset-id="dataset.activeDataset.value?.datasetId ?? null"
             :selectable="true"
             :show-manage-link="true"
-            action-label="Use saved upload"
+            action-label="Use upload"
             @select="dataset.useExistingDataset"
           />
         </template>
@@ -147,45 +111,37 @@ const resetFlow = () => {
       </div>
       <div class="card-actions">
         <button
-          class="btn btn-secondary"
-          :disabled="dataset.isUploading.value"
-          @click="currentStep = 1"
-        >
-          Back
-        </button>
-        <button
           class="btn btn-primary"
           :disabled="!dataset.uploadSuccess.value"
-          @click="currentStep = 3"
+          @click="currentStep = 2"
         >
-          Next
+          Frame area
         </button>
       </div>
     </div>
 
     <AreaSelectionCard
-      v-else-if="currentStep === 3"
-      title="Step 3: Pick the map area"
-      description="Search for a city and drag the corners to frame the routes you want in the final map."
+      v-else-if="currentStep === 2"
+      title="Step 2: Frame the map area"
+      description="Search a city and drag the box around the routes you want to keep."
       :city-name="cityName"
       :bbox="bbox"
-      @back="currentStep = 2"
-      @next="currentStep = 4"
+      next-label="Build map"
+      @back="currentStep = 1"
+      @next="currentStep = 3"
       @select-city="handleSelectCity"
     >
       <MapView v-model:bbox="bbox" :center="center" :show-b-box="true" :routes="[]" />
     </AreaSelectionCard>
 
-    <div v-else-if="currentStep === 4" class="card flow-card text-center">
-      <h2>Step 4: Build the lightning map</h2>
-      <p>
-        Filtering the uploaded activities against the selected bounding box and keeping only rides.
-      </p>
+    <div v-else-if="currentStep === 3" class="card flow-card text-center">
+      <h2>Step 3: Build the map</h2>
+      <p>Filtering saved rides inside the selected bounding box.</p>
 
       <div v-if="dataset.isFiltering.value" class="processing-indicator">
         <div class="processing-ring"></div>
-        <h3>Running the route filter…</h3>
-        <p>Querying the uploaded GeoParquet data inside your selected area.</p>
+        <h3>Running the filter…</h3>
+        <p>Querying the saved dataset inside the selected area.</p>
       </div>
 
       <div v-else-if="dataset.filterError.value" class="error-banner">
@@ -199,9 +155,9 @@ const resetFlow = () => {
         v-else-if="dataset.activitiesCount.value !== null"
         class="success-banner centered-banner"
       >
-        <h3>Routes ready</h3>
+        <h3>Ready</h3>
         <p class="lead-text compact-lead">
-          Found <strong>{{ dataset.activitiesCount.value }}</strong> ride activities in
+          Found <strong>{{ dataset.activitiesCount.value }}</strong> rides in
           <strong>{{ cityName }}</strong
           >.
         </p>
@@ -211,26 +167,26 @@ const resetFlow = () => {
         <button
           class="btn btn-secondary"
           :disabled="dataset.isFiltering.value"
-          @click="currentStep = 3"
+          @click="currentStep = 2"
         >
           Back
         </button>
         <button
           class="btn btn-primary"
           :disabled="dataset.activitiesCount.value === null || dataset.isFiltering.value"
-          @click="currentStep = 5"
+          @click="currentStep = 4"
         >
-          Next
+          Open map
         </button>
       </div>
     </div>
 
     <div v-else class="card-group">
       <section class="card flow-card final-card">
-        <h2>Lightning Map</h2>
+        <h2>Map preview</h2>
         <p>
-          Showing <strong>{{ dataset.activitiesCount.value }}</strong> rides intersecting
-          <strong>{{ cityName }}</strong> in a single orange route layer.
+          Showing <strong>{{ dataset.activitiesCount.value }}</strong> rides from
+          <strong>{{ cityName }}</strong> in one route layer.
         </p>
 
         <div class="export-summary">
@@ -244,8 +200,8 @@ const resetFlow = () => {
         </div>
 
         <div class="card-actions mt-auto">
-          <button class="btn btn-secondary" @click="currentStep = 4">Back</button>
-          <button class="btn btn-secondary" @click="resetFlow">Start Over</button>
+          <button class="btn btn-secondary" @click="currentStep = 3">Back</button>
+          <button class="btn btn-secondary" @click="resetFlow">Start over</button>
         </div>
       </section>
 
@@ -265,7 +221,7 @@ const resetFlow = () => {
 .flow-layout {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
 .centered-banner {

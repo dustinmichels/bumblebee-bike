@@ -23,7 +23,7 @@ const props = withDefaults(
     manageable: false,
     openable: false,
     emptyMessage: "No uploaded GeoParquet files yet.",
-    actionLabel: "Use this upload",
+    actionLabel: "Use upload",
     showManageLink: false,
     busyDatasetId: null,
   },
@@ -187,32 +187,32 @@ const submitRename = (datasetId: string) => {
 .upload-library {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .upload-library-head {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   align-items: flex-start;
 }
 
 .upload-library-head h3 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   color: #fff;
 }
 
 .upload-library-head p {
   margin: 0;
   color: #b0b0b0;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
 .sort-control {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  font-size: 0.75rem;
+  gap: 6px;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -225,7 +225,7 @@ const submitRename = (datasetId: string) => {
   border: 1px solid #444;
   border-radius: 8px;
   color: #fff;
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .upload-empty {
@@ -236,18 +236,18 @@ const submitRename = (datasetId: string) => {
 .upload-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: 420px;
+  gap: 10px;
+  max-height: 380px;
   overflow-y: auto;
 }
 
 .upload-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: #242424;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #202020;
   border: 1px solid #333;
 }
 
@@ -259,7 +259,7 @@ const submitRename = (datasetId: string) => {
 .upload-copy {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -267,7 +267,7 @@ const submitRename = (datasetId: string) => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .upload-title-row strong {
@@ -276,11 +276,11 @@ const submitRename = (datasetId: string) => {
 
 .selected-pill {
   border-radius: 999px;
-  padding: 4px 10px;
+  padding: 3px 9px;
   background: rgba(255, 153, 0, 0.12);
   border: 1px solid rgba(255, 153, 0, 0.4);
   color: #ffb347;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -295,16 +295,16 @@ const submitRename = (datasetId: string) => {
 .upload-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
   color: #a0a0a0;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
 }
 
 .upload-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 

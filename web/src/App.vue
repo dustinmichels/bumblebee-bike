@@ -38,7 +38,7 @@ const onSelectTool = (tool: string) => {
         <div class="logo">🗺️</div>
         <div>
           <h1>Map Tools</h1>
-          <p class="tagline">Build ride maps from Strava bulk exports.</p>
+          <p class="tagline">Build ride maps from saved Strava exports.</p>
         </div>
       </div>
 
@@ -51,7 +51,7 @@ const onSelectTool = (tool: string) => {
           Uploads
         </button>
         <button v-if="activeTool !== 'home'" class="btn btn-secondary" @click="router.push('/')">
-          All Tools
+          Home
         </button>
         <div class="api-badge" :class="health">
           API status: <code>{{ health ?? "…" }}</code>
@@ -88,7 +88,7 @@ body {
     Ubuntu,
     Cantarell,
     sans-serif;
-  background: #121212;
+  background: #111;
   color: #e0e0e0;
   min-height: 100vh;
 }
@@ -101,21 +101,21 @@ textarea {
 }
 
 code {
-  background: #1e1e1e;
+  background: #1b1b1b;
   padding: 0.15em 0.4em;
   border-radius: 4px;
-  font-size: 0.9em;
+  font-size: 0.88em;
   color: #ff9900;
 }
 
 .app-layout {
-  max-width: 1240px;
+  max-width: 1180px;
   width: 100%;
   margin: 0 auto;
-  padding: 24px 16px 40px;
+  padding: 18px 16px 28px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 18px;
 }
 
 .app-header {
@@ -123,46 +123,47 @@ code {
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid #222;
-  padding-bottom: 16px;
+  padding-bottom: 12px;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 12px;
 }
 
 .header-main {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .header-side {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .logo {
-  font-size: 2.25rem;
+  font-size: 1.85rem;
+  line-height: 1;
 }
 
 .app-header h1 {
-  font-size: 1.9rem;
-  margin: 0 0 4px;
+  font-size: 1.72rem;
+  margin: 0 0 2px;
   font-weight: 700;
   color: #fff;
 }
 
 .tagline {
   margin: 0;
-  font-size: 0.98rem;
-  color: #a0a0a0;
+  font-size: 0.9rem;
+  color: #9f9f9f;
 }
 
 .api-badge {
-  font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 20px;
-  background: #1a1a1a;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #181818;
   border: 1px solid #333;
   color: #aaa;
 }
@@ -178,39 +179,40 @@ code {
 .app-content {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
 .control-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .control-label {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: #ff9900;
 }
 
 .stepper {
   display: flex;
-  justify-content: space-between;
-  background: #1a1a1a;
-  border: 1px solid #2d2d2d;
-  padding: 16px 24px;
-  border-radius: 12px;
-  gap: 8px;
+  justify-content: flex-start;
+  align-items: center;
+  background: #171717;
+  border: 1px solid #2b2b2b;
+  padding: 10px 12px;
+  border-radius: 10px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .step-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  opacity: 0.4;
+  gap: 7px;
+  opacity: 0.5;
   transition: opacity 0.2s;
 }
 
@@ -220,20 +222,20 @@ code {
 }
 
 .step-item.completed {
-  opacity: 0.8;
+  opacity: 0.82;
   color: #44bb44;
 }
 
 .step-circle {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #333;
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -248,7 +250,7 @@ code {
 }
 
 .step-label {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
 }
 
@@ -259,9 +261,9 @@ code {
 }
 
 .btn {
-  padding: 10px 20px;
+  padding: 8px 14px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
   transition:
@@ -289,59 +291,64 @@ code {
 }
 
 .btn-secondary {
-  background: #2a2a2a;
+  background: #242424;
   color: #fff;
-  border: 1px solid #444;
+  border: 1px solid #3c3c3c;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #3a3a3a;
+  background: #303030;
   border-color: #555;
 }
 
 .card {
-  background: #1a1a1a;
-  border: 1px solid #2d2d2d;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background: #181818;
+  border: 1px solid #2b2b2b;
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
 }
 
 .card h2 {
   margin-top: 0;
-  margin-bottom: 12px;
-  font-size: 1.5rem;
+  margin-bottom: 10px;
+  font-size: 1.28rem;
+  line-height: 1.25;
   color: #fff;
 }
 
 .card p {
   margin-top: 0;
   color: #b0b0b0;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
 .card-group {
   display: grid;
-  grid-template-columns: 380px 1fr;
-  gap: 20px;
-  min-height: 550px;
+  grid-template-columns: 340px 1fr;
+  gap: 16px;
+  min-height: 500px;
+  align-items: stretch;
 }
 
 @media (max-width: 980px) {
   .card-group {
     grid-template-columns: 1fr;
+    min-height: 0;
   }
 }
 
 .map-container-wrapper {
   width: 100%;
-  height: 550px;
+  height: 500px;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .card-actions {
   display: flex;
-  gap: 12px;
-  margin-top: 24px;
+  gap: 10px;
+  margin-top: 18px;
   flex-wrap: wrap;
 }
 
@@ -358,22 +365,22 @@ code {
 }
 
 .hero-card {
-  padding: 36px;
+  padding: 22px;
 }
 
 .lead-text {
-  font-size: 1.05rem;
+  font-size: 0.98rem;
   color: #aaa;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 .upload-zone {
-  border: 2px dashed #444;
-  border-radius: 8px;
-  padding: 40px 20px;
+  border: 1.5px dashed #444;
+  border-radius: 10px;
+  padding: 26px 18px;
   text-align: center;
   cursor: pointer;
-  background: #1e1e1e;
+  background: #1c1c1c;
   transition:
     border-color 0.15s,
     background 0.15s;
@@ -383,7 +390,7 @@ code {
 .upload-zone:hover,
 .upload-zone.dragging {
   border-color: #ff9900;
-  background: #222;
+  background: #212121;
 }
 
 .file-input {
@@ -398,14 +405,14 @@ code {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   color: #aaa;
-  font-size: 14px;
+  font-size: 13.5px;
   cursor: pointer;
 }
 
 .upload-icon {
-  font-size: 32px;
+  font-size: 28px;
 }
 
 .file-name {
@@ -414,12 +421,12 @@ code {
 }
 
 .error-banner {
-  background: rgba(220, 50, 50, 0.15);
+  background: rgba(220, 50, 50, 0.14);
   border: 1px solid #d32f2f;
   color: #ef5350;
-  padding: 12px 16px;
-  border-radius: 6px;
-  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
   text-align: left;
 }
 
@@ -427,28 +434,28 @@ code {
   background: rgba(50, 200, 50, 0.1);
   border: 1px solid #388e3c;
   color: #81c784;
-  padding: 16px;
+  padding: 12px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 13px;
   text-align: left;
 }
 
 .progress-container {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   background: #1a1a1a;
   border: 1px solid #333;
-  padding: 16px;
+  padding: 12px;
   border-radius: 8px;
   color: #aaa;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 .progress-spinner {
-  width: 20px;
-  height: 20px;
-  border: 3px solid #333;
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid #333;
   border-top-color: #ff9900;
   border-radius: 50%;
   animation: spin-spin 1s linear infinite;
@@ -468,27 +475,27 @@ code {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 40px 20px;
+  padding: 28px 16px;
 }
 
 .processing-ring {
-  width: 60px;
-  height: 60px;
-  border: 5px solid #2a2a2a;
+  width: 48px;
+  height: 48px;
+  border: 4px solid #2a2a2a;
   border-top-color: #ff9900;
   border-radius: 50%;
   animation: spin-spin 1s linear infinite;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .step-instructions ol {
-  padding-left: 20px;
-  line-height: 1.6;
+  padding-left: 18px;
+  line-height: 1.55;
   color: #b0b0b0;
 }
 
 .step-instructions li + li {
-  margin-top: 8px;
+  margin-top: 7px;
 }
 
 .link {
@@ -502,51 +509,53 @@ code {
 }
 
 .city-box {
-  background: #242424;
+  background: #202020;
   border: 1px solid #333;
-  padding: 12px 16px;
-  border-radius: 6px;
-  margin-top: 20px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-top: 14px;
 }
 
 .city-box h4 {
   margin: 0 0 6px;
   color: #888;
-  font-size: 11px;
+  font-size: 10.5px;
   text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .city-name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: #fff;
 }
 
 .export-summary {
-  margin: 20px 0;
+  margin: 16px 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .export-summary h4 {
   margin: 0;
   color: #888;
-  font-size: 11px;
+  font-size: 10.5px;
   text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .export-summary p {
   margin: 0;
   color: #fff;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .block {
   display: block;
   font-family: monospace;
   background: #111;
-  padding: 8px 12px;
+  padding: 7px 10px;
   border-radius: 4px;
 }
 
@@ -554,5 +563,32 @@ code {
 .final-card {
   display: flex;
   flex-direction: column;
+}
+
+@media (max-width: 720px) {
+  .app-layout {
+    padding: 14px 12px 22px;
+  }
+
+  .app-header {
+    align-items: flex-start;
+  }
+
+  .header-side {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .card {
+    padding: 16px;
+  }
+
+  .hero-card {
+    padding: 18px;
+  }
+
+  .map-container-wrapper {
+    height: 420px;
+  }
 }
 </style>

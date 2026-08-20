@@ -18,7 +18,7 @@ const isDragging = ref(false);
 
 const selectedFilesLabel = computed(() => {
   if (!props.selectedFiles.length) {
-    return "Click to choose one or more ZIP files, or drag them here.";
+    return "Choose one or more ZIPs, or drop them here.";
   }
 
   if (props.selectedFiles.length === 1) {
@@ -47,12 +47,9 @@ const droppedFiles = (event: DragEvent) => {
 <template>
   <section class="card upload-card">
     <div class="upload-card-head">
-      <div>
-        <h2>Upload new Strava exports</h2>
-        <p>
-          Choose one or more bulk export ZIP files. Each upload gets processed into GeoParquet and
-          saved locally in your upload library.
-        </p>
+      <div class="upload-card-copy">
+        <h2>Process Strava ZIPs</h2>
+        <p>Select one or more bulk export ZIPs and save them as reusable GeoParquet datasets.</p>
       </div>
     </div>
 
@@ -81,20 +78,20 @@ const droppedFiles = (event: DragEvent) => {
 
     <div v-if="isUploading" class="progress-container">
       <div class="progress-spinner"></div>
-      <span>Processing ZIP archives, parsing activities, and writing GeoParquet files...</span>
+      <span>Processing ZIPs and writing saved GeoParquet datasets…</span>
     </div>
 
     <div v-if="uploadSummary" class="success-banner upload-success">
-      <strong>Upload complete.</strong>
+      <strong>Done.</strong>
       <span>{{ uploadSummary }}</span>
     </div>
 
     <button
-      class="btn btn-primary"
+      class="btn btn-primary upload-action"
       :disabled="!selectedFiles.length || isUploading"
       @click="emit('upload')"
     >
-      Upload selected archives
+      Process selected ZIPs
     </button>
   </section>
 </template>
@@ -103,25 +100,25 @@ const droppedFiles = (event: DragEvent) => {
 .upload-card {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .upload-card-head {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   align-items: flex-start;
 }
 
-.upload-card-head h2 {
-  margin: 0 0 8px;
-  color: #fff;
+.upload-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.upload-card-head p {
+.upload-card-copy h2,
+.upload-card-copy p {
   margin: 0;
-  color: #b0b0b0;
-  line-height: 1.5;
 }
 
 .selected-file-list {
@@ -137,16 +134,27 @@ const droppedFiles = (event: DragEvent) => {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-radius: 10px;
-  background: #242424;
+  background: #202020;
   border: 1px solid #333;
   color: #d0d0d0;
+  font-size: 0.92rem;
 }
 
 .upload-success {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+}
+
+.upload-action {
+  align-self: flex-start;
+}
+
+@media (max-width: 700px) {
+  .upload-action {
+    width: 100%;
+  }
 }
 </style>

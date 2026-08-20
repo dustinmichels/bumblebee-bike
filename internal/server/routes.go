@@ -61,6 +61,10 @@ type uploadRecord struct {
 }
 
 var openUploadPath = revealPathInFileManager
+var nowUTC = func() time.Time {
+	return time.Now().UTC()
+}
+var ingestZip = strava.IngestZip
 
 type UploadResponse struct {
 	Status    string          `json:"status"`
@@ -126,7 +130,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, header, err := r.FormFile("file")
+	file, _, err := r.FormFile("file")
 	if err != nil {
 		slog.Error("failed to get file from form", "err", err)
 		http.Error(w, "invalid file key 'file' in form", http.StatusBadRequest)
@@ -134,7 +138,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	response, err := processUploadedArchive(file, header.Filename)
+	response, err := processUploadedArchive(file)
 	if err != nil {
 		slog.Error("ingest failed", "sessionId", response.SessionID, "err", err)
 		http.Error(w, fmt.Sprintf("ingest failed: %v", err), http.StatusInternalServerError)
@@ -307,8 +311,20 @@ func handleDeleteUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 type FilterRequest struct {
-	SessionId string     `json:"sessionId"`
-	BBox      [4]float64 `json:"bbox"`
+	SessionId string      `json:"sessionId"`
+	BBox      *[4]float64 `json:"bbox,omitempty"`
+}
+
+func buildRideFilterWhereClause(bbox *[4]float64) string {
+	conditions := []string{"activity_type = 'Ride'"}
+	if bbox != nil {
+		conditions = append(conditions, fmt.Sprintf(
+			"ST_Intersects(geometry, ST_MakeEnvelope(%f, %f, %f, %f))",
+			bbox[0], bbox[1], bbox[2], bbox[3],
+		))
+	}
+
+	return "WHERE " + strings.Join(conditions, " AND ")
 }
 
 func handleFilter(w http.ResponseWriter, r *http.Request) {
@@ -336,10 +352,7 @@ func handleFilter(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("filtering activities with duckdb", "sessionId", req.SessionId, "bbox", req.BBox)
 
-	whereClause := fmt.Sprintf(
-		"WHERE ST_Intersects(geometry, ST_MakeEnvelope(%f, %f, %f, %f)) AND activity_type = 'Ride'",
-		req.BBox[0], req.BBox[1], req.BBox[2], req.BBox[3],
-	)
+	whereClause := buildRideFilterWhereClause(req.BBox)
 
 	geoJSONData, err := exportGeoJSONFromParquet(record.parquetPath, whereClause)
 	if err != nil {
@@ -391,7 +404,7 @@ COPY (
 	return os.ReadFile(outputGeoJSON)
 }
 
-func processUploadedArchive(file io.Reader, originalFilename string) (UploadResponse, error) {
+func processUploadedArchive(file io.Reader) (UploadResponse, error) {
 	response := UploadResponse{}
 
 	uploadDir, err := uploadDataDir()
@@ -399,9 +412,14 @@ func processUploadedArchive(file io.Reader, originalFilename string) (UploadResp
 		return response, err
 	}
 
-	sessionID := uuid.New().String()
-	parquetPath := filepath.Join(uploadDir, "activities-"+sessionID+".parquet")
+	createdAt := nowUTC()
+	fileBaseName, err := nextBulkUploadBaseName(createdAt)
+	if err != nil {
+		return response, err
+	}
 
+	sessionID := uuid.New().String()
+	parquetPath := filepath.Join(uploadDir, fileBaseName+".parquet")
 	zipFile, err := os.CreateTemp("", "maptools-upload-*.zip")
 	if err != nil {
 		return response, err
@@ -419,22 +437,17 @@ func processUploadedArchive(file io.Reader, originalFilename string) (UploadResp
 	}
 
 	slog.Info("processing upload zip", "sessionId", sessionID, "zipPath", zipPath)
-	res, err := strava.IngestZip(zipPath, parquetPath)
+	res, err := ingestZip(zipPath, parquetPath)
 	_ = os.Remove(zipPath)
 	if err != nil {
 		_ = os.Remove(parquetPath)
 		return UploadResponse{SessionID: sessionID}, err
 	}
 
-	createdAt := time.Now().UTC()
-	displayName := defaultDisplayName(originalFilename)
-	if displayName == "" {
-		displayName = "activities-" + sessionID
-	}
-
 	total := res.Total
 	parsed := res.Parsed
 	rideCount := res.RideCount
+	displayName := fileBaseName
 	metadata := uploadMetadata{
 		DatasetID:   sessionID,
 		DisplayName: displayName,
@@ -699,9 +712,41 @@ func revealPathInFileManager(path string) error {
 	}
 }
 
-func defaultDisplayName(filename string) string {
-	name := strings.TrimSpace(strings.TrimSuffix(filename, filepath.Ext(filename)))
-	return name
+func nextBulkUploadBaseName(createdAt time.Time) (string, error) {
+	baseName := "bulk_upload_" + createdAt.UTC().Format(time.DateOnly)
+	searchDirs, err := uploadSearchDirs()
+	if err != nil {
+		return "", err
+	}
+
+	for suffix := 1; ; suffix++ {
+		candidate := baseName
+		if suffix > 1 {
+			candidate = fmt.Sprintf("%s_%d", baseName, suffix)
+		}
+
+		exists, err := uploadFileExists(searchDirs, candidate+".parquet")
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+}
+
+func uploadFileExists(searchDirs []string, fileName string) (bool, error) {
+	for _, dir := range searchDirs {
+		_, err := os.Stat(filepath.Join(dir, fileName))
+		if err == nil {
+			return true, nil
+		}
+		if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+
+	return false, nil
 }
 
 func sanitizeUploadFileName(name string) string {

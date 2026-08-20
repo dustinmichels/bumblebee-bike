@@ -67,7 +67,7 @@ onMounted(() => {
       <router-link to="/" class="back-link">← Back to map tools</router-link>
     </header>
 
-    <div class="card-group">
+    <div class="card-group map-test-board">
       <div class="card flow-card">
         <h2>Direct dataset preview</h2>
         <p>
@@ -95,7 +95,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="map-container-wrapper">
+      <div class="map-container-wrapper map-test-map">
         <MapView v-model:bbox="bbox" :center="center" :routes="previewRoute" :show-b-box="false" />
       </div>
     </div>
@@ -116,9 +116,9 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 24px;
+  padding: 16px 18px;
   border-bottom: 1px solid #222;
-  background: #1a1a1a;
+  background: #181818;
 }
 
 .back-link {
@@ -132,47 +132,18 @@ onMounted(() => {
   text-decoration: underline;
 }
 
-.card-group {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 360px 1fr;
-  gap: 20px;
-  padding: 24px;
-}
-
-.card {
-  background: #1a1a1a;
-  border: 1px solid #2d2d2d;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.flow-card {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.flow-card h2 {
-  margin: 0;
-  font-size: 1.5rem;
-  color: #fff;
-}
-
-.flow-card p {
-  margin: 0;
-  line-height: 1.5;
-  color: #b0b0b0;
+.map-test-board {
+  padding: 18px 16px 28px;
+  align-items: start;
 }
 
 .status-card {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 16px;
+  padding: 12px;
   border-radius: 8px;
-  background: #242424;
+  background: #202020;
   border: 1px solid #333;
 }
 
@@ -200,19 +171,30 @@ onMounted(() => {
   background: rgba(220, 50, 50, 0.15);
   border: 1px solid #d32f2f;
   color: #ef5350;
-  padding: 12px 16px;
-  border-radius: 6px;
-  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
   text-align: left;
 }
 
-.map-container-wrapper {
-  min-height: 550px;
+.map-test-map {
+  height: 500px;
+  min-height: 500px;
 }
 
-@media (max-width: 900px) {
-  .card-group {
-    grid-template-columns: 1fr;
+@media (max-width: 720px) {
+  .map-test-header {
+    padding: 14px 12px;
+  }
+
+  .map-test-board {
+    padding: 14px 12px 22px;
+  }
+
+  .map-test-map {
+    height: 420px;
+    min-height: 420px;
   }
 }
+
 </style>

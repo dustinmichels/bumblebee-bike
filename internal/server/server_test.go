@@ -13,6 +13,8 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/dustinmichels/bumblebee-bike/internal/strava"
 )
 
 func TestHealth(t *testing.T) {
@@ -211,6 +213,117 @@ func TestListRenameOpenAndDeleteUploads(t *testing.T) {
 	}
 }
 
+func TestNextBulkUploadBaseNameAppendsDailySuffix(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "uploads")
+	t.Setenv("MAPTOOLS_DATA_DIR", dataDir)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, fileName := range []string{
+		"bulk_upload_2026-08-19.parquet",
+		"bulk_upload_2026-08-19_2.parquet",
+	} {
+		if err := os.WriteFile(filepath.Join(dataDir, fileName), []byte("parquet"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	baseName, err := nextBulkUploadBaseName(time.Date(2026, time.August, 19, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseName != "bulk_upload_2026-08-19_3" {
+		t.Fatalf("expected suffixed base name, got %q", baseName)
+	}
+}
+
+func TestUploadNamesBulkUploadsByDay(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "uploads")
+	t.Setenv("MAPTOOLS_DATA_DIR", dataDir)
+
+	createdAt := time.Date(2026, time.August, 19, 8, 0, 0, 0, time.UTC)
+	restoreNowUTC := nowUTC
+	nowUTC = func() time.Time {
+		return createdAt
+	}
+	defer func() {
+		nowUTC = restoreNowUTC
+	}()
+
+	restoreIngestZip := ingestZip
+	ingestZip = func(zipPath, outPath string) (strava.IngestResult, error) {
+		if _, err := os.Stat(zipPath); err != nil {
+			return strava.IngestResult{}, err
+		}
+		if err := os.WriteFile(outPath, []byte("parquet"), 0644); err != nil {
+			return strava.IngestResult{}, err
+		}
+		return strava.IngestResult{Total: 2, Parsed: 2, RideCount: 1}, nil
+	}
+	defer func() {
+		ingestZip = restoreIngestZip
+	}()
+
+	router := apiRouter()
+
+	upload := func(fileName string) UploadResponse {
+		t.Helper()
+
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		fw, err := mw.CreateFormFile("file", fileName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fw.Write([]byte("zip-bytes")); err != nil {
+			t.Fatal(err)
+		}
+		if err := mw.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest("POST", "/upload", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			body, _ := io.ReadAll(rr.Body)
+			t.Fatalf("upload failed with status %d: %s", rr.Code, body)
+		}
+
+		var resp UploadResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+
+		return resp
+	}
+
+	first := upload("strava-export.zip")
+	if first.Dataset.DisplayName != "bulk_upload_2026-08-19" {
+		t.Fatalf("expected first display name, got %q", first.Dataset.DisplayName)
+	}
+	if first.Dataset.FileName != "bulk_upload_2026-08-19.parquet" {
+		t.Fatalf("expected first file name, got %q", first.Dataset.FileName)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, first.Dataset.FileName)); err != nil {
+		t.Fatalf("expected first parquet file to exist: %v", err)
+	}
+
+	second := upload("strava-export-again.zip")
+	if second.Dataset.DisplayName != "bulk_upload_2026-08-19_2" {
+		t.Fatalf("expected suffixed display name, got %q", second.Dataset.DisplayName)
+	}
+	if second.Dataset.FileName != "bulk_upload_2026-08-19_2.parquet" {
+		t.Fatalf("expected suffixed file name, got %q", second.Dataset.FileName)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, second.Dataset.FileName)); err != nil {
+		t.Fatalf("expected second parquet file to exist: %v", err)
+	}
+}
+
 func TestUploadAndFilter(t *testing.T) {
 	zipPath := "../../data/strava_export.zip"
 	if _, err := os.Stat(zipPath); os.IsNotExist(err) {
@@ -219,6 +332,15 @@ func TestUploadAndFilter(t *testing.T) {
 
 	dataDir := filepath.Join(t.TempDir(), "uploads")
 	t.Setenv("MAPTOOLS_DATA_DIR", dataDir)
+
+	createdAt := time.Date(2026, time.August, 19, 8, 0, 0, 0, time.UTC)
+	restoreNowUTC := nowUTC
+	nowUTC = func() time.Time {
+		return createdAt
+	}
+	defer func() {
+		nowUTC = restoreNowUTC
+	}()
 
 	router := apiRouter()
 
@@ -267,6 +389,12 @@ func TestUploadAndFilter(t *testing.T) {
 	if dataset["datasetId"] != sessionId {
 		t.Fatalf("expected datasetId %q, got %v", sessionId, dataset["datasetId"])
 	}
+	if dataset["displayName"] != "bulk_upload_2026-08-19" {
+		t.Fatalf("expected upload display name to be bulk_upload_2026-08-19, got %v", dataset["displayName"])
+	}
+	if dataset["fileName"] != "bulk_upload_2026-08-19.parquet" {
+		t.Fatalf("expected upload file name to be bulk_upload_2026-08-19.parquet, got %v", dataset["fileName"])
+	}
 
 	if uploadResp["total"] == nil || uploadResp["parsed"] == nil || uploadResp["rideCount"] == nil || uploadResp["summary"] == nil {
 		t.Errorf("missing statistics in upload response: %v", uploadResp)
@@ -291,20 +419,60 @@ func TestUploadAndFilter(t *testing.T) {
 		}
 	}
 
-	parquetPath := filepath.Join(dataDir, "activities-"+sessionId+".parquet")
+	parquetPath := filepath.Join(dataDir, "bulk_upload_2026-08-19.parquet")
 	defer os.Remove(parquetPath)
 	defer os.Remove(uploadMetadataPath(parquetPath))
 	if _, err := os.Stat(parquetPath); os.IsNotExist(err) {
 		t.Fatalf("expected parquet file to exist at %s, but it does not", parquetPath)
 	}
 
+	bbox := [4]float64{-71.1912, 42.2279, -70.9227, 42.3969}
 	filterReqBody := FilterRequest{
 		SessionId: sessionId,
-		BBox:      [4]float64{-71.1912, 42.2279, -70.9227, 42.3969},
+		BBox:      &bbox,
 	}
 	bodyBuf, err := json.Marshal(filterReqBody)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	decodeFilterResponse := func(rr *httptest.ResponseRecorder) []interface{} {
+		if rr.Code != http.StatusOK {
+			body, _ := io.ReadAll(rr.Body)
+			t.Fatalf("filter failed with status %d: %s", rr.Code, body)
+		}
+
+		var geojson map[string]interface{}
+		if err := json.NewDecoder(rr.Body).Decode(&geojson); err != nil {
+			t.Fatalf("failed to decode geojson output: %v", err)
+		}
+
+		if geojson["type"] != "FeatureCollection" {
+			t.Errorf("expected type FeatureCollection, got %v", geojson["type"])
+		}
+
+		features, ok := geojson["features"].([]interface{})
+		if !ok {
+			t.Fatal("geojson features is not a slice")
+		}
+
+		for index, feature := range features {
+			featureMap, ok := feature.(map[string]interface{})
+			if !ok {
+				t.Fatalf("feature %d is not an object", index)
+			}
+
+			properties, ok := featureMap["properties"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("feature %d properties missing", index)
+			}
+
+			if properties["activity_type"] != "Ride" {
+				t.Fatalf("feature %d activity_type = %v, want Ride", index, properties["activity_type"])
+			}
+		}
+
+		return features
 	}
 
 	reqFilter := httptest.NewRequest("POST", "/filter", bytes.NewReader(bodyBuf))
@@ -312,29 +480,27 @@ func TestUploadAndFilter(t *testing.T) {
 	rrFilter := httptest.NewRecorder()
 	router.ServeHTTP(rrFilter, reqFilter)
 
-	if rrFilter.Code != http.StatusOK {
-		body, _ := io.ReadAll(rrFilter.Body)
-		t.Fatalf("filter failed with status %d: %s", rrFilter.Code, body)
-	}
-
-	var geojson map[string]interface{}
-	if err := json.NewDecoder(rrFilter.Body).Decode(&geojson); err != nil {
-		t.Fatalf("failed to decode geojson output: %v", err)
-	}
-
-	if geojson["type"] != "FeatureCollection" {
-		t.Errorf("expected type FeatureCollection, got %v", geojson["type"])
-	}
-
-	features, ok := geojson["features"].([]interface{})
-	if !ok {
-		t.Fatal("geojson features is not a slice")
-	}
-
+	features := decodeFilterResponse(rrFilter)
 	if len(features) == 0 {
 		t.Error("expected at least some rides to be returned, got 0")
 	} else {
 		t.Logf("found %d rides matching search criteria", len(features))
+	}
+
+	filterAllReqBody := FilterRequest{SessionId: sessionId}
+	allBodyBuf, err := json.Marshal(filterAllReqBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reqFilterAll := httptest.NewRequest("POST", "/filter", bytes.NewReader(allBodyBuf))
+	reqFilterAll.Header.Set("Content-Type", "application/json")
+	rrFilterAll := httptest.NewRecorder()
+	router.ServeHTTP(rrFilterAll, reqFilterAll)
+
+	allFeatures := decodeFilterResponse(rrFilterAll)
+	if len(allFeatures) < len(features) {
+		t.Fatalf("expected all-rides filter to return at least %d rides, got %d", len(features), len(allFeatures))
 	}
 }
 

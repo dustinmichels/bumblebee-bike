@@ -9,7 +9,10 @@ import { useUploadedDatasets } from "../../composables/useUploadedDatasets";
 import {
   DEFAULT_BOSTON_BBOX,
   DEFAULT_BOSTON_CENTER,
+  bboxCenter,
+  getFeatureCollectionBounds,
   type BBox,
+  type GeoJSONFeatureCollection,
   type LngLat,
   type RouteLayer,
   type SelectedCity,
@@ -30,6 +33,7 @@ const bbox = ref<BBox>([...DEFAULT_BOSTON_BBOX]);
 const center = ref<LngLat>([...DEFAULT_BOSTON_CENTER]);
 const personOneColor = ref("#ff8c00");
 const personTwoColor = ref("#2563eb");
+const compareAllRides = ref(false);
 const personOne = useActivityDataset();
 const personTwo = useActivityDataset();
 const uploadLibrary = useUploadedDatasets();
@@ -48,17 +52,35 @@ const compareRoutes = computed<RouteLayer[]>(() => [
     data: personTwo.activitiesGeoJSON.value,
   },
 ]);
-
 const totalComparedActivities = computed(
   () => (personOne.activitiesCount.value ?? 0) + (personTwo.activitiesCount.value ?? 0),
 );
-
 const hasBothUploads = computed(
   () => personOne.uploadSuccess.value && personTwo.uploadSuccess.value,
 );
 const isFiltering = computed(() => personOne.isFiltering.value || personTwo.isFiltering.value);
 const hasResults = computed(
   () => personOne.activitiesCount.value !== null && personTwo.activitiesCount.value !== null,
+);
+
+const combinedCompareGeoJSON = computed<GeoJSONFeatureCollection>(() => ({
+  type: "FeatureCollection",
+  features: compareRoutes.value.flatMap((route) => route.data?.features ?? []),
+}));
+const compareBounds = computed(() => getFeatureCollectionBounds(combinedCompareGeoJSON.value));
+const compareMapBBox = computed<BBox>(() =>
+  compareAllRides.value && compareBounds.value ? compareBounds.value : bbox.value,
+);
+const compareMapCenter = computed<LngLat>(() =>
+  compareAllRides.value && compareBounds.value ? bboxCenter(compareBounds.value) : center.value,
+);
+const areaStepTitle = computed(() =>
+  compareAllRides.value ? "Step 2: Compare every ride" : "Step 2: Frame one shared area",
+);
+const areaStepDescription = computed(() =>
+  compareAllRides.value
+    ? "Skip the bounding box and compare every Ride activity from both uploads."
+    : "Search a city and drag the box around the area both riders should share.",
 );
 const filterErrors = computed(() =>
   [personOne.filterError.value, personTwo.filterError.value].filter((message): message is string =>
@@ -87,9 +109,11 @@ const submitPersonTwoArchive = async () => {
 };
 
 const runCompare = async () => {
+  const selectedBBox = compareAllRides.value ? null : bbox.value;
+
   await Promise.all([
-    personOne.filterActivities(bbox.value),
-    personTwo.filterActivities(bbox.value),
+    personOne.filterActivities(selectedBBox),
+    personTwo.filterActivities(selectedBBox),
   ]);
 };
 
@@ -108,6 +132,7 @@ const resetFlow = () => {
   cityName.value = "Boston, MA, USA";
   bbox.value = [...DEFAULT_BOSTON_BBOX];
   center.value = [...DEFAULT_BOSTON_CENTER];
+  compareAllRides.value = false;
   personOneColor.value = "#ff8c00";
   personTwoColor.value = "#2563eb";
   personOne.reset();
@@ -122,8 +147,8 @@ const resetFlow = () => {
     <div v-if="currentStep === 1" class="flow-layout">
       <div class="compare-upload-grid">
         <DatasetUploadCard
-          title="Person 1"
-          description="Reuse a saved GeoParquet file or upload the first Strava bulk export ZIP."
+          title="Rider 1"
+          description="Pick a saved GeoParquet dataset or process the first Strava ZIP."
           :selected-file="personOne.selectedFile.value"
           :upload-error="personOne.uploadError.value"
           :is-uploading="personOne.isUploading.value"
@@ -144,18 +169,18 @@ const resetFlow = () => {
             <UploadedDatasetList
               v-if="uploadLibrary.uploads.value.length"
               title="Saved uploads"
-              description="Select a GeoParquet file you already processed, or upload a fresh archive below."
+              description="Pick an existing dataset for Rider 1."
               :uploads="uploadLibrary.uploads.value"
               :selected-dataset-id="personOne.activeDataset.value?.datasetId ?? null"
               :selectable="true"
-              action-label="Use saved upload"
+              action-label="Use upload"
               @select="personOne.useExistingDataset"
             />
           </template>
         </DatasetUploadCard>
         <DatasetUploadCard
-          title="Person 2"
-          description="Reuse another saved GeoParquet file or upload the second Strava bulk export ZIP."
+          title="Rider 2"
+          description="Pick another saved dataset or process the second Strava ZIP."
           :selected-file="personTwo.selectedFile.value"
           :upload-error="personTwo.uploadError.value"
           :is-uploading="personTwo.isUploading.value"
@@ -176,12 +201,12 @@ const resetFlow = () => {
             <UploadedDatasetList
               v-if="uploadLibrary.uploads.value.length"
               title="Saved uploads"
-              description="Pick an existing GeoParquet file, or upload another ZIP below."
+              description="Pick an existing dataset for Rider 2."
               :uploads="uploadLibrary.uploads.value"
               :selected-dataset-id="personTwo.activeDataset.value?.datasetId ?? null"
               :selectable="true"
               :show-manage-link="true"
-              action-label="Use saved upload"
+              action-label="Use upload"
               @select="personTwo.useExistingDataset"
             />
           </template>
@@ -192,42 +217,49 @@ const resetFlow = () => {
         ⚠️ {{ uploadLibrary.error.value }}
       </div>
 
-      <div class="card compare-hint">
-        <h2>Compare two people on one map</h2>
-        <p>
-          Choose both uploads first. After that you'll select one shared area and overlay both ride
-          collections on the same basemap.
-        </p>
-      </div>
+      <p class="compare-note">Load both riders, then choose a shared box or compare every Ride.</p>
 
       <div class="card-actions">
         <button class="btn btn-primary" :disabled="!hasBothUploads" @click="currentStep = 2">
-          Next
+          Choose scope
         </button>
       </div>
     </div>
 
     <AreaSelectionCard
       v-else-if="currentStep === 2"
-      title="Step 2: Pick one shared area"
-      description="Search for the place you want to compare, then drag the bounding box to frame both riders together."
+      :title="areaStepTitle"
+      :description="areaStepDescription"
       :city-name="cityName"
       :bbox="bbox"
+      :show-current-area="!compareAllRides"
+      next-label="Build compare map"
       @back="currentStep = 1"
       @next="currentStep = 3"
       @select-city="handleSelectCity"
     >
-      <MapView v-model:bbox="bbox" :center="center" :show-b-box="true" :routes="[]" />
+      <template #details>
+        <label class="compare-scope-toggle">
+          <input v-model="compareAllRides" type="checkbox" class="compare-scope-checkbox" />
+          <span class="compare-scope-copy">
+            <strong>Compare all rides</strong>
+            <span>Skip the box and include every Ride activity from both uploads.</span>
+          </span>
+        </label>
+      </template>
+      <MapView v-model:bbox="bbox" :center="center" :show-b-box="!compareAllRides" :routes="[]" />
     </AreaSelectionCard>
 
     <div v-else-if="currentStep === 3" class="card flow-card text-center">
-      <h2>Step 3: Build the comparison map</h2>
-      <p>Filtering both uploaded datasets against the same bounding box.</p>
+      <h2>Step 3: Build the compare map</h2>
+      <p v-if="compareAllRides">Filtering every Ride activity for Rider 1 and Rider 2.</p>
+      <p v-else>Filtering both riders inside the same bounding box.</p>
 
       <div v-if="isFiltering" class="processing-indicator">
         <div class="processing-ring"></div>
         <h3>Processing both riders…</h3>
-        <p>Running the route query for Person 1 and Person 2 at the same time.</p>
+        <p v-if="compareAllRides">Loading every Ride activity from both uploaded datasets.</p>
+        <p v-else>Running the same area filter for Rider 1 and Rider 2.</p>
       </div>
 
       <div v-else-if="filterErrors.length" class="error-stack">
@@ -240,11 +272,11 @@ const resetFlow = () => {
       </div>
 
       <div v-else-if="hasResults" class="success-banner centered-banner">
-        <h3>Comparison ready</h3>
+        <h3>Ready</h3>
         <p class="lead-text compact-lead">
-          Found <strong>{{ totalComparedActivities }}</strong> total rides inside
-          <strong>{{ cityName }}</strong
-          >.
+          Found <strong>{{ totalComparedActivities }}</strong> total rides
+          <template v-if="compareAllRides">across both uploaded datasets.</template>
+          <template v-else>in <strong>{{ cityName }}</strong>.</template>
         </p>
       </div>
 
@@ -252,72 +284,70 @@ const resetFlow = () => {
         <button class="btn btn-secondary" :disabled="isFiltering" @click="currentStep = 2">
           Back
         </button>
-        <button
-          class="btn btn-primary"
-          :disabled="!hasResults || isFiltering"
-          @click="currentStep = 4"
-        >
-          Next
+        <button class="btn btn-primary" :disabled="!hasResults || isFiltering" @click="currentStep = 4">
+          Open map
         </button>
       </div>
     </div>
 
     <div v-else class="card-group compare-results-layout">
       <section class="card flow-card final-card">
-        <h2>Compare</h2>
+        <h2>Compare map</h2>
         <p>
-          Overlaying <strong>{{ totalComparedActivities }}</strong> rides from both uploaded exports
-          inside <strong>{{ cityName }}</strong
-          >.
+          Overlaying <strong>{{ totalComparedActivities }}</strong> rides from both riders
+          <template v-if="compareAllRides">across both uploaded datasets.</template>
+          <template v-else>inside <strong>{{ cityName }}</strong>.</template>
         </p>
 
         <div class="compare-legend">
           <div class="legend-row">
             <span class="legend-swatch" :style="{ backgroundColor: personOneColor }"></span>
             <div class="legend-copy">
-              <strong>Person 1</strong>
+              <strong>Rider 1</strong>
               <span>{{ personOne.activitiesCount.value }} rides</span>
             </div>
             <input
               v-model="personOneColor"
               type="color"
               class="legend-picker"
-              aria-label="Person 1 color"
+              aria-label="Rider 1 color"
             />
           </div>
           <div class="legend-row">
             <span class="legend-swatch" :style="{ backgroundColor: personTwoColor }"></span>
             <div class="legend-copy">
-              <strong>Person 2</strong>
+              <strong>Rider 2</strong>
               <span>{{ personTwo.activitiesCount.value }} rides</span>
             </div>
             <input
               v-model="personTwoColor"
               type="color"
               class="legend-picker"
-              aria-label="Person 2 color"
+              aria-label="Rider 2 color"
             />
           </div>
         </div>
 
         <div class="export-summary">
-          <h4>Location</h4>
-          <p>{{ cityName }}</p>
-          <h4>Bounding Box</h4>
-          <code class="block"
-            >{{ bbox[0].toFixed(4) }}, {{ bbox[1].toFixed(4) }}, {{ bbox[2].toFixed(4) }},
-            {{ bbox[3].toFixed(4) }}</code
-          >
+          <h4>Scope</h4>
+          <p>{{ compareAllRides ? "All uploaded rides" : cityName }}</p>
+          <template v-if="!compareAllRides">
+            <h4>Bounding Box</h4>
+            <code class="block"
+              >{{ bbox[0].toFixed(4) }}, {{ bbox[1].toFixed(4) }}, {{ bbox[2].toFixed(4) }},
+              {{ bbox[3].toFixed(4) }}</code
+            >
+          </template>
         </div>
 
         <div class="card-actions mt-auto">
           <button class="btn btn-secondary" @click="currentStep = 3">Back</button>
-          <button class="btn btn-secondary" @click="resetFlow">Start Over</button>
+          <button class="btn btn-secondary" @click="resetFlow">Start over</button>
         </div>
       </section>
 
       <div class="map-container-wrapper">
-        <MapView v-model:bbox="bbox" :center="center" :show-b-box="false" :routes="compareRoutes" />
+        <MapView :bbox="compareMapBBox" :center="compareMapCenter" :show-b-box="false" :routes="compareRoutes" />
       </div>
     </div>
   </section>
@@ -327,33 +357,24 @@ const resetFlow = () => {
 .flow-layout {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
 .compare-upload-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  gap: 16px;
 }
 
-.compare-hint {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.compare-hint h2 {
+.compare-note {
   margin: 0;
-}
-
-.compare-hint p {
-  margin: 0;
+  color: #9c9c9c;
 }
 
 .error-stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .retry-actions {
@@ -368,24 +389,24 @@ const resetFlow = () => {
 .compare-legend {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 20px;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .legend-row {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-radius: 10px;
-  background: #242424;
+  background: #202020;
   border: 1px solid #333;
 }
 
 .legend-swatch {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 999px;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
 }
@@ -402,17 +423,47 @@ const resetFlow = () => {
 }
 
 .legend-copy span {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   color: #a0a0a0;
 }
 
 .legend-picker {
-  width: 46px;
-  height: 34px;
+  width: 42px;
+  height: 30px;
   border: 1px solid #444;
   border-radius: 8px;
   background: #111;
   padding: 4px;
+}
+
+.compare-scope-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #202020;
+  border: 1px solid #333;
+}
+
+.compare-scope-checkbox {
+  margin: 3px 0 0;
+  accent-color: #ff9900;
+}
+
+.compare-scope-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compare-scope-copy strong {
+  color: #fff;
+}
+
+.compare-scope-copy span {
+  color: #a0a0a0;
+  font-size: 0.9rem;
 }
 
 .centered-banner {

@@ -105,7 +105,7 @@ export function useActivityDataset() {
     applyUploadedDataset(upload, true);
   };
 
-  const filterActivities = async (bbox: BBox) => {
+  const filterActivities = async (bbox?: BBox | null) => {
     if (!sessionId.value) {
       return;
     }
@@ -121,7 +121,7 @@ export function useActivityDataset() {
         },
         body: JSON.stringify({
           sessionId: sessionId.value,
-          bbox,
+          ...(bbox ? { bbox } : {}),
         }),
       });
 

@@ -26,7 +26,7 @@ const props = withDefaults(
     color: "#ff9900",
     colorLabel: "Route color",
     showColorPicker: false,
-    uploadLabel: "Upload archive",
+    uploadLabel: "Process ZIP",
   },
 );
 
@@ -53,7 +53,7 @@ const droppedFile = (event: DragEvent) => {
 <template>
   <section class="card upload-card">
     <div class="upload-card-head">
-      <div>
+      <div class="upload-card-copy">
         <h3>{{ title }}</h3>
         <p>{{ description }}</p>
       </div>
@@ -84,7 +84,7 @@ const droppedFile = (event: DragEvent) => {
         <span v-if="selectedFile" class="file-name"
           >{{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})</span
         >
-        <span v-else>Click to choose file or drag it here</span>
+        <span v-else>Choose one ZIP or drop it here</span>
       </label>
     </div>
 
@@ -92,23 +92,21 @@ const droppedFile = (event: DragEvent) => {
 
     <div v-if="isUploading" class="progress-container">
       <div class="progress-spinner"></div>
-      <span>Processing zip archive, parsing activities, and writing GeoParquet...</span>
+      <span>Processing the ZIP into a saved GeoParquet dataset…</span>
     </div>
 
     <div v-if="uploadSuccess" class="success-banner upload-success">
-      <strong>{{ usingExistingDataset ? "Saved upload selected." : "Archive ready." }}</strong>
+      <strong>{{ usingExistingDataset ? "Saved upload ready." : "ZIP processed." }}</strong>
       <span v-if="usingExistingDataset">
-        Using {{ activeDatasetName ?? "the selected GeoParquet file" }} from your local upload
-        library.
+        Using {{ activeDatasetName ?? "the selected GeoParquet file" }} from the local library.
       </span>
       <span v-else>
-        Successfully parsed {{ parsedCount }} / {{ totalCount }} activities. {{ rideCount }} are
-        rides.
+        Parsed {{ parsedCount }} / {{ totalCount }} activities and kept {{ rideCount }} rides.
       </span>
     </div>
 
     <button
-      class="btn btn-primary"
+      class="btn btn-primary upload-action"
       :disabled="!selectedFile || isUploading || uploadSuccess"
       @click="emit('upload')"
     >
@@ -121,38 +119,38 @@ const droppedFile = (event: DragEvent) => {
 .upload-card {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .upload-card-head {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   align-items: flex-start;
 }
 
-.upload-card-head h3 {
-  margin: 0 0 8px;
-  color: #fff;
+.upload-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.upload-card-head p {
+.upload-card-copy h3,
+.upload-card-copy p {
   margin: 0;
-  color: #b0b0b0;
-  line-height: 1.5;
 }
 
 .source-selection {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .color-control {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  font-size: 0.75rem;
+  gap: 6px;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -160,8 +158,8 @@ const droppedFile = (event: DragEvent) => {
 }
 
 .color-control input {
-  width: 52px;
-  height: 36px;
+  width: 46px;
+  height: 32px;
   border: 1px solid #444;
   border-radius: 8px;
   background: #111;
@@ -171,12 +169,20 @@ const droppedFile = (event: DragEvent) => {
 .upload-success {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+}
+
+.upload-action {
+  align-self: flex-start;
 }
 
 @media (max-width: 700px) {
   .upload-card-head {
     flex-direction: column;
+  }
+
+  .upload-action {
+    width: 100%;
   }
 }
 </style>

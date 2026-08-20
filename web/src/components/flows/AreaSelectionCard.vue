@@ -12,11 +12,13 @@ const props = withDefaults(
     backLabel?: string;
     nextLabel?: string;
     nextDisabled?: boolean;
+    showCurrentArea?: boolean;
   }>(),
   {
     backLabel: "Back",
     nextLabel: "Next",
     nextDisabled: false,
+    showCurrentArea: true,
   },
 );
 
@@ -29,20 +31,25 @@ const emit = defineEmits<{
 
 <template>
   <div class="card-group">
-    <section class="card flow-card">
-      <h2>{{ props.title }}</h2>
-      <p>{{ props.description }}</p>
-
-      <div class="control-panel">
-        <label class="control-label">Search for a City</label>
-        <SearchCity @select-city="emit('selectCity', $event)" />
+    <section class="card flow-card area-card">
+      <div class="area-copy">
+        <h2 class="area-title">{{ props.title }}</h2>
+        <p class="area-description">{{ props.description }}</p>
       </div>
 
-      <div class="city-box">
-        <h4>Current Area</h4>
-        <div class="city-name">{{ props.cityName }}</div>
-        <BBoxCoords :bbox="props.bbox" />
+      <div class="area-toolbar">
+        <div class="control-panel area-search">
+          <label class="control-label">Search for a city</label>
+          <SearchCity @select-city="emit('selectCity', $event)" />
+        </div>
+
+        <div v-if="props.showCurrentArea" class="city-box area-current">
+          <h4>Current area</h4>
+          <div class="city-name">{{ props.cityName }}</div>
+          <BBoxCoords :bbox="props.bbox" />
+        </div>
       </div>
+      <slot name="details" />
 
       <div class="card-actions mt-auto">
         <button class="btn btn-secondary" @click="emit('back')">{{ props.backLabel }}</button>
@@ -57,3 +64,35 @@ const emit = defineEmits<{
     </div>
   </div>
 </template>
+
+<style scoped>
+.area-card {
+  gap: 16px;
+}
+
+.area-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.area-title,
+.area-description {
+  margin: 0;
+}
+
+.area-toolbar {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.area-search {
+  min-width: 0;
+}
+
+.area-current {
+  margin-top: 0;
+}
+</style>

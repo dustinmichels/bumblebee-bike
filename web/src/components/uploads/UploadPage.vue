@@ -25,6 +25,15 @@ const uploadSummary = computed(() => {
   } locally.`;
 });
 
+const uploadBadges = ["Request the ZIP", "Process locally", "Reuse in every map"];
+const guideSteps = [
+  "Log into Strava on your computer.",
+  "Open Settings → My Account.",
+  "Go to Download or Delete Your Account.",
+  "Choose Request Your Archive.",
+  "Download the ZIP link from the email.",
+];
+
 const setSelectedFiles = (files: File[]) => {
   selectedFiles.value = files;
   uploadError.value = null;
@@ -75,33 +84,62 @@ onMounted(() => {
 
 <template>
   <section class="upload-page">
-    <div class="card hero-card upload-hero">
-      <span class="hero-kicker">Local upload library</span>
-      <h2>Manage saved GeoParquet files</h2>
-      <p class="lead-text upload-copy">
-        Upload one or more Strava bulk exports, keep the processed GeoParquet files in your local
-        Map Tools data directory, and reuse them from any map workflow.
-      </p>
-    </div>
+    <header class="card hero-card upload-bar">
+      <div class="upload-bar-copy">
+        <span class="hero-kicker">Upload library</span>
+        <h2>Build the saved dataset library.</h2>
+        <p class="lead-text upload-copy">
+          Request a Strava bulk export, process the ZIP here, then reuse the saved GeoParquet in
+          Lightning Map or Compare.
+        </p>
+      </div>
 
-    <BulkUploadCard
-      :selected-files="selectedFiles"
-      :is-uploading="isUploading"
-      :upload-error="uploadError"
-      :upload-summary="uploadSummary"
-      @select-files="setSelectedFiles"
-      @upload="uploadSelectedFiles"
-    />
+      <ul class="upload-badges" aria-label="Upload workflow summary">
+        <li v-for="badge in uploadBadges" :key="badge">{{ badge }}</li>
+      </ul>
+    </header>
 
-    <section class="card">
+    <section class="upload-workbench">
+      <section class="card export-guide">
+        <div class="guide-head">
+          <div>
+            <span class="hero-kicker">Strava export</span>
+            <h3>Get the ZIP</h3>
+          </div>
+          <a
+            href="https://support.strava.com/en-us/articles/15401919-exporting-your-data-and-bulk-export"
+            target="_blank"
+            class="link"
+            >Open guide</a
+          >
+        </div>
+
+        <p class="guide-copy">Request the archive in Strava, then download the ZIP from the email.</p>
+
+        <ol class="guide-steps">
+          <li v-for="step in guideSteps" :key="step">{{ step }}</li>
+        </ol>
+      </section>
+
+      <BulkUploadCard
+        :selected-files="selectedFiles"
+        :is-uploading="isUploading"
+        :upload-error="uploadError"
+        :upload-summary="uploadSummary"
+        @select-files="setSelectedFiles"
+        @upload="uploadSelectedFiles"
+      />
+    </section>
+
+    <section class="card upload-library-card">
       <UploadedDatasetList
         title="Saved uploads"
-        description="These GeoParquet files live in your local Map Tools data directory. Open them in Finder or your file manager, rename them, delete them, and reuse them from Lightning Map or Compare."
+        description="Rename, delete, open, and reuse the GeoParquet files stored in your local Map Tools library."
         :uploads="uploadLibrary.uploads.value"
         :manageable="true"
         :openable="true"
         :busy-dataset-id="uploadLibrary.busyDatasetId.value"
-        empty-message="No GeoParquet uploads found in your local library yet."
+        empty-message="No GeoParquet uploads found in the local library yet."
         @rename="uploadLibrary.renameUpload($event.datasetId, $event.name)"
         @open="uploadLibrary.openUpload"
         @delete="uploadLibrary.deleteUpload"
@@ -118,30 +156,100 @@ onMounted(() => {
 .upload-page {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
 
-.upload-hero {
+.upload-bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.upload-bar-copy {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  max-width: 720px;
 }
 
 .hero-kicker {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #ff9900;
 }
 
-.upload-hero h2 {
+.upload-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
   margin: 0;
-  color: #fff;
+  padding: 0;
+}
+
+.upload-badges li {
+  border: 1px solid #333;
+  background: #202020;
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: #c9c9c9;
+  font-size: 0.76rem;
+  line-height: 1;
 }
 
 .upload-copy {
-  max-width: 760px;
   margin: 0;
+}
+
+.upload-workbench {
+  display: grid;
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.export-guide,
+.upload-library-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.guide-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.guide-head h3,
+.guide-copy {
+  margin: 0;
+}
+
+.guide-steps {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.55;
+}
+
+.guide-steps li + li {
+  margin-top: 7px;
+}
+
+@media (max-width: 980px) {
+  .upload-workbench {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .upload-bar,
+  .guide-head {
+    flex-direction: column;
+  }
 }
 </style>
